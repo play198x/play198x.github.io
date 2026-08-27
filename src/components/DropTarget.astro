@@ -8,8 +8,13 @@
  * who drops it; see src/scripts/player.ts. The a11y gate in Task 9 checks
  * this path, but that is not why it exists.
  *
- * Draws nothing and decodes nothing — it names what the file is and where
- * it will go. Task 5 draws the picture; Task 8 plays the module.
+ * Draws nothing and decodes nothing itself — it names what the file is and
+ * where it goes. Task 5 draws a decoded picture; Task 8 plays a module.
+ *
+ * Task 6 adds the archive entry list below: a dropped ZIP or Amiga ADF disk
+ * image that holds more than one entry is listed here rather than guessed
+ * at, populated by src/scripts/player.ts's renderArchiveList(). Empty and
+ * hidden until there's an archive to show.
  */
 ---
 
@@ -21,6 +26,8 @@
   </div>
   <p id="drop-target-status" class="drop-target-status" role="status" aria-live="polite"></p>
 </div>
+
+<ul id="archive-entries" class="archive-entries" hidden></ul>
 
 <script>
   import { onFile } from '../scripts/player';
@@ -57,6 +64,16 @@
 </script>
 
 <style>
+  /* `hidden` must actually hide — see Player.astro's matching comment on
+   * this exact collision. `.archive-entries` below sets `display: flex`,
+   * which (being a normal author rule) would otherwise beat the browser's
+   * own `[hidden] { display: none }` (user-agent origin) regardless of
+   * specificity, leaving an empty list rendered before any archive is
+   * opened. */
+  [hidden] {
+    display: none !important;
+  }
+
   .drop-target {
     display: flex;
     flex-direction: column;
@@ -114,5 +131,52 @@
     color: var(--h-ink-body);
     font-family: var(--h-font-mono);
     font-size: 0.9em;
+  }
+
+  .archive-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--h-font-ui);
+  }
+
+  .archive-entry {
+    margin: 0;
+  }
+
+  .archive-entry-button {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--h-line);
+    border-radius: 6px;
+    background: var(--h-ground);
+    color: var(--h-ink-body);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .archive-entry-button:hover,
+  .archive-entry-button:focus-visible {
+    border-color: var(--h-accent);
+    background: var(--h-surface-light);
+  }
+
+  /* Greyed out, not hidden — a visitor who dropped a disk expecting a tune
+   * needs to see the disk holds no tune, which reads differently from
+   * seeing nothing. A real `disabled` attribute drives this (see
+   * archiveEntryRow() in src/scripts/player.ts), not a class applied to a
+   * plain <span> — native disabled semantics are what makes this row
+   * announced as disabled and unreachable by keyboard, not just styled to
+   * look that way. */
+  .archive-entry-button:disabled {
+    border-style: dashed;
+    border-color: var(--h-line-soft);
+    background: none;
+    color: var(--h-ink-muted);
+    cursor: default;
   }
 </style>
