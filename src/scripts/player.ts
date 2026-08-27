@@ -148,8 +148,21 @@ function playerElements() {
  * pixels, and a C64 multicolour bitmap (160×200 mode pixels at 2:1) drawn
  * at a 160-wide CSS size is drawn at half its real width. `image-rendering:
  * pixelated` (set in Player.astro's stylesheet) keeps the upscale sharp.
+ *
+ * Only ONE fixed CSS dimension is set here (`width`), never both. Player
+ * Astro's stylesheet declares `max-width: 100%; height: auto;` so the
+ * picture shrinks to fit a narrow viewport — but an inline `style.height`
+ * would win over that stylesheet rule regardless of selector specificity,
+ * pinning the height while `max-width` shrank the width and distorting
+ * the picture. Setting `aspect-ratio` alongside the single fixed `width`
+ * lets `height: auto` do its job: the browser derives the used height from
+ * whatever width the layout actually gives the canvas, at the picture's
+ * real (aspect-corrected) ratio, at every viewport width.
  */
-function drawImage(canvas: HTMLCanvasElement, image: DecodedImage): void {
+// Exported only so tests/draw-image.test.mjs can pin the CSS-dimension
+// contract (exactly one fixed dimension, plus aspect-ratio) without a real
+// <canvas>. Not part of this module's public API for any other caller.
+export function drawImage(canvas: HTMLCanvasElement, image: DecodedImage): void {
   canvas.width = image.width;
   canvas.height = image.height;
 
@@ -161,8 +174,10 @@ function drawImage(canvas: HTMLCanvasElement, image: DecodedImage): void {
   const rgba = new Uint8ClampedArray(image.rgba);
   context.putImageData(new ImageData(rgba, image.width, image.height), 0, 0);
 
-  canvas.style.width = `${image.width * image.pixel_aspect_w}px`;
-  canvas.style.height = `${image.height * image.pixel_aspect_h}px`;
+  const displayWidth = image.width * image.pixel_aspect_w;
+  const displayHeight = image.height * image.pixel_aspect_h;
+  canvas.style.width = `${displayWidth}px`;
+  canvas.style.aspectRatio = `${displayWidth} / ${displayHeight}`;
 }
 
 function paletteSwatches(palette: Uint8Array): HTMLSpanElement[] {
