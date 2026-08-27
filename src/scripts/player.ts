@@ -127,9 +127,11 @@ export function describeEntry(probed: ProbeResult | undefined, byteLength: numbe
   return { route: 'unknown', label: 'unrecognised format', openable: false };
 }
 
-// The core caps a container's resident bytes at 64 MiB (see
-// play198x-core's MAX_ARCHIVE_LEN) — restated here as a literal since the
-// constant itself is private to that crate. `Container`'s constructor takes
+// The core caps a container's resident bytes at 64 MiB — see
+// play198x-core/crates/play198x-core/src/container.rs:40, `const
+// MAX_ARCHIVE_LEN: u64 = 64 * 1024 * 1024` (67,108,864 bytes, matching the
+// literal below) — restated here rather than imported, since the constant
+// itself is private to that crate. `Container`'s constructor takes
 // ownership of a `Vec<u8>` copied out of whatever `Uint8Array` it's handed,
 // so it cannot undo an oversized allocation this file already made by
 // reading a huge `File` into memory. The check below runs on `File.size`
@@ -499,11 +501,20 @@ function archiveEntryRow(container: Container, path: string, file: File): HTMLLI
     description = { route: 'unknown', label: `couldn't be read: ${detail}`, openable: false };
   }
 
+  // Always a <button> — never a styled <span> for the disabled case.
+  // `aria-disabled` only changes what's announced on an element that
+  // already carries a widget role; on a bare <span> it does nothing in
+  // NVDA, JAWS or VoiceOver, so a visitor using one would hear the label
+  // text but never learn the row is unopenable — it would only *look*
+  // grey. A native `disabled` button gives that for free: announced as
+  // disabled, dropped from the tab order, and inert without a click
+  // handler to suppress or a role to fake.
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'archive-entry-button';
+  button.textContent = `${path} — ${description.label}`;
+
   if (description.openable) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'archive-entry-button';
-    button.textContent = `${path} — ${description.label}`;
     button.addEventListener('click', () => {
       // Guards against a stale row from an archive that's since been
       // replaced by a new drop — freeContainer() clears currentContainer
@@ -512,15 +523,11 @@ function archiveEntryRow(container: Container, path: string, file: File): HTMLLI
         openEntry(container, path, file);
       }
     });
-    li.appendChild(button);
   } else {
-    const span = document.createElement('span');
-    span.className = 'archive-entry-disabled';
-    span.setAttribute('aria-disabled', 'true');
-    span.textContent = `${path} — ${description.label}`;
-    li.appendChild(span);
+    button.disabled = true;
   }
 
+  li.appendChild(button);
   return li;
 }
 
@@ -561,17 +568,29 @@ function openContainer(container: Container, file: File): void {
 
   const count = container.entry_count;
 
+  // Both branches below own `container` outright and must free it before
+  // returning — in `finally`, not after a plain call, so a throw from
+  // report()/hidePlayer()/openEntry() can't leak up to 64 MiB of wasm
+  // memory. The single-entry branch is the common path (a plain dropped
+  // file is always a one-entry container), not an edge case, so this
+  // matters on every ordinary drop, not just archives.
   if (count === 0) {
-    report(`${file.name} is an empty archive — there's nothing inside to open.`);
-    hidePlayer();
-    container.free();
+    try {
+      report(`${file.name} is an empty archive — there's nothing inside to open.`);
+      hidePlayer();
+    } finally {
+      container.free();
+    }
     return;
   }
 
   if (count === 1) {
-    const path = container.entry_path(0) ?? file.name;
-    openEntry(container, path, file);
-    container.free();
+    try {
+      const path = container.entry_path(0) ?? file.name;
+      openEntry(container, path, file);
+    } finally {
+      container.free();
+    }
     return;
   }
 

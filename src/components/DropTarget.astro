@@ -167,12 +167,16 @@
 
   /* Greyed out, not hidden — a visitor who dropped a disk expecting a tune
    * needs to see the disk holds no tune, which reads differently from
-   * seeing nothing. */
-  .archive-entry-disabled {
-    display: block;
-    padding: 0.5rem 0.75rem;
-    border: 1px dashed var(--h-line-soft);
-    border-radius: 6px;
+   * seeing nothing. A real `disabled` attribute drives this (see
+   * archiveEntryRow() in src/scripts/player.ts), not a class applied to a
+   * plain <span> — native disabled semantics are what makes this row
+   * announced as disabled and unreachable by keyboard, not just styled to
+   * look that way. */
+  .archive-entry-button:disabled {
+    border-style: dashed;
+    border-color: var(--h-line-soft);
+    background: none;
     color: var(--h-ink-muted);
+    cursor: default;
   }
 </style>
