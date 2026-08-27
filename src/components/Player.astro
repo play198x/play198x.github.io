@@ -1,0 +1,145 @@
+---
+// Draws whatever picture player.ts decoded and shows what is known about
+// it. This component owns no logic of its own — decoding, canvas drawing,
+// metadata formatting and the format-override wiring all live in
+// src/scripts/player.ts, so they can be exercised without a DOM (see
+// tests/decode-image.test.mjs). This file is markup plus the one line that
+// wires the override <select> to that logic.
+//
+// Hidden until src/scripts/player.ts has something to show: a file that
+// doesn't decode to a picture (audio, unknown, or nothing dropped yet)
+// leaves this panel untouched and out of the way.
+---
+
+<section id="player-panel" class="player-panel" hidden>
+  <canvas id="player-canvas" class="player-canvas"></canvas>
+
+  <div class="player-info">
+    <dl id="player-meta" class="player-meta">
+      <dt>Source</dt>
+      <dd id="player-source"></dd>
+      <dt>Format</dt>
+      <dd id="player-format"></dd>
+      <dt>Size</dt>
+      <dd id="player-dimensions"></dd>
+    </dl>
+
+    <!-- A .scr always probes "probable" — there is no author here to declare
+         the format, so a weak identification is said out loud rather than
+         rendered as if it were certain. -->
+    <p id="player-confidence-note" class="player-confidence-note" hidden></p>
+
+    <div id="player-override-wrap" class="player-override-wrap" hidden>
+      <label class="player-override-label" for="player-override">
+        Not what you expected? Try another format:
+      </label>
+      <select id="player-override" class="player-override"></select>
+    </div>
+
+    <div
+      id="player-palette"
+      class="player-palette"
+      role="img"
+      aria-label="The picture's palette, in hardware colour order"
+    ></div>
+  </div>
+</section>
+
+<script>
+  import { wireFormatOverride } from '../scripts/player';
+
+  wireFormatOverride();
+</script>
+
+<style>
+  .player-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: flex-start;
+    margin-top: 1.5rem;
+    padding: clamp(1rem, 4vw, 1.75rem);
+    border: 1px solid var(--h-line);
+    border-radius: 8px;
+    background: var(--h-ground);
+    font-family: var(--h-font-ui);
+    color: var(--h-ink-body);
+  }
+
+  /* The buffer is sized in mode pixels by script (width/height); the CSS
+   * size is sized from pixel_aspect_w/h by the same script. Mode pixels are
+   * not display pixels — see src/scripts/player.ts's drawImage(). */
+  .player-canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    image-rendering: pixelated;
+    background: #000;
+    border: 1px solid var(--h-line-soft);
+  }
+
+  .player-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 16rem;
+    flex: 1 1 16rem;
+  }
+
+  .player-meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.25rem 0.75rem;
+    margin: 0;
+  }
+
+  .player-meta dt {
+    color: var(--h-ink-muted);
+    font-size: 0.85em;
+  }
+
+  .player-meta dd {
+    margin: 0;
+    font-family: var(--h-font-mono);
+    font-size: 0.9em;
+  }
+
+  .player-confidence-note {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    border-left: 3px solid var(--h-accent);
+    background: var(--h-surface-light);
+    color: var(--h-ink-body);
+    font-size: 0.85em;
+  }
+
+  .player-override-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .player-override-label {
+    color: var(--h-ink-muted);
+    font-size: 0.85em;
+  }
+
+  .player-override {
+    font-family: inherit;
+    font-size: 0.9em;
+  }
+
+  .player-palette {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  :global(.player-swatch) {
+    display: inline-block;
+    width: 1.1rem;
+    height: 1.1rem;
+    border: 1px solid var(--h-line-soft);
+    border-radius: 2px;
+  }
+</style>
