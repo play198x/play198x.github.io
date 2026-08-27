@@ -1,0 +1,30 @@
+---
+// Placeholder page for Task 2: prove the pinned 198x-ui kit resolves and its
+// tokens apply. The player itself arrives in later tasks.
+import '@198x-ui/tokens.css';
+import Plate from '@198x-ui/components/Plate.astro';
+import SiteNav from '@198x-ui/components/SiteNav.astro';
+
+const items = [{ label: 'Play198x', href: '/', current: true }];
+---
+
+<!doctype html>
+<!-- data-tint carries the project colour as an ambient ground, at the
+     ceilings fixed in the kit's tokens.css. See family-visual-identity.md §3b. -->
+<html lang="en" data-tint="play">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Play198x: a retro media player that runs entirely in your browser." />
+    <title>Play198x</title>
+    <link rel="sitemap" href="/sitemap-index.xml" />
+  </head>
+  <body>
+    <SiteNav prefix="play" project="play" items={items} />
+    <main>
+      <Plate prefix="play" project="play" size={28} />
+      <h1>Play198x</h1>
+      <p>A retro media player is coming here — nothing you feed it ever leaves your browser.</p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "play198x.github.io",
+  "type": "module",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "ui:fetch": "./scripts/fetch-ui.sh",
+    "predev": "npm run ui:fetch",
+    "dev": "astro dev",
+    "prebuild": "npm run ui:fetch",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "node --test 'tests/**/*.test.mjs'"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "astro": "^7.0.3"
+  }
+}
