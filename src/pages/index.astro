@@ -4,6 +4,7 @@
 import '@198x-ui/tokens.css';
 import Plate from '@198x-ui/components/Plate.astro';
 import SiteNav from '@198x-ui/components/SiteNav.astro';
+import DropTarget from '../components/DropTarget.astro';
 
 const items = [{ label: 'Play198x', href: '/', current: true }];
 ---
@@ -25,6 +26,7 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
       <Plate prefix="play" project="play" size={28} />
       <h1>Play198x</h1>
       <p>A retro media player is coming here — nothing you feed it ever leaves your browser.</p>
+      <DropTarget />
     </main>
     <script type="module" is:inline>
       // Proves the decoder actually runs in the browser, not just that it
