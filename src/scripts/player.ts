@@ -3,12 +3,21 @@
 // onFile() with the same File object; the picker is the accessible path
 // (keyboard, touch, screen reader), not a fallback bolted on afterwards.
 //
-// Task 5 adds the image path: a file that classifies as `image` is decoded
+// Task 5 added the image path: a file that classifies as `image` is decoded
 // and drawn to Player.astro's canvas, with its metadata and a manual format
-// override shown beside it. Playing a module is Task 8 — nothing here
-// touches audio bytes.
+// override shown beside it.
+//
+// Task 6 adds the container path: every dropped file is opened as a
+// `Container` — a plain file is a container of exactly one entry, a ZIP or
+// an Amiga ADF disk image is a container of many. A single entry may open
+// directly; several are listed in DropTarget.astro's entry list for the
+// visitor to pick from, each one probed so the list says what it is, with
+// what cannot be opened greyed out rather than hidden.
+//
+// Playing a module is Task 8 — nothing here touches audio bytes, so a
+// ProTracker entry is identified but never marked openable yet.
 
-import init, { decode_image, probe, type DecodedImage } from '@play198x/web';
+import init, { decode_image, probe, Container, type DecodedImage, type ImageMeta } from '@play198x/web';
 
 export type Route = 'image' | 'audio' | 'unknown';
 
@@ -23,9 +32,13 @@ export interface RouteResult {
   message: string;
 }
 
-// Names a human recognises, keyed by what `probe` returns. A SCREEN$ has no
-// magic number — its length is the entire signal — so every name here is
-// worth saying even when the confidence is only "probable".
+// Names a human recognises, keyed by what `probe` (and `ImageMeta.format`)
+// return. A SCREEN$ has no magic number — its length is the entire signal —
+// so every name here is worth saying even when the confidence is only
+// "probable". This mapping is presentation copy the wasm boundary has no
+// business owning (English display strings, not decoded data), so it stays
+// here even though `ImageMeta` now supplies everything else about a decoded
+// picture — see showMetadata() below.
 const IMAGE_FORMATS: Record<string, string> = {
   scr: 'a ZX Spectrum SCREEN$',
   koala: 'a Commodore 64 Koala Paint image',
@@ -75,6 +88,84 @@ export function classify(probed: ProbeResult | undefined, byteLength: number): R
   };
 }
 
+/** What one row in DropTarget.astro's archive entry list shows and whether
+ * it can be clicked. */
+export interface EntryDescription {
+  route: Route;
+  label: string;
+  openable: boolean;
+}
+
+/**
+ * Describe one container entry for the entry list: a short label plus
+ * whether it can be opened. Reuses classify()'s route decision — the same
+ * probe result must never be routed two different ways by two copies of the
+ * same logic — but writes a label sized for a list row rather than a full
+ * sentence.
+ *
+ * Only the `image` route is openable: audio playback (Task 8) doesn't exist
+ * yet, so a recognised ProTracker module is named honestly rather than
+ * offered as something this player can actually do yet.
+ */
+export function describeEntry(probed: ProbeResult | undefined, byteLength: number): EntryDescription {
+  const { route } = classify(probed, byteLength);
+
+  if (route === 'image' && probed) {
+    const qualifier = probed.confidence === 'certain' ? '' : 'probably ';
+    return { route, label: `${qualifier}${IMAGE_FORMATS[probed.format]}`, openable: true };
+  }
+
+  if (route === 'audio' && probed) {
+    const qualifier = probed.confidence === 'certain' ? '' : 'probably ';
+    return { route, label: `${qualifier}${AUDIO_FORMATS[probed.format]} — playback isn't wired up yet`, openable: false };
+  }
+
+  if (probed) {
+    return { route: 'unknown', label: `identified as "${probed.format}", not supported here`, openable: false };
+  }
+
+  return { route: 'unknown', label: 'unrecognised format', openable: false };
+}
+
+// The core caps a container's resident bytes at 64 MiB (see
+// play198x-core's MAX_ARCHIVE_LEN) — restated here as a literal since the
+// constant itself is private to that crate. `Container`'s constructor takes
+// ownership of a `Vec<u8>` copied out of whatever `Uint8Array` it's handed,
+// so it cannot undo an oversized allocation this file already made by
+// reading a huge `File` into memory. The check below runs on `File.size`
+// BEFORE `arrayBuffer()` is ever called, so a visitor dropping a multi-
+// gigabyte file gets a clear refusal instead of the tab locking up trying to
+// read it in.
+export const MAX_CONTAINER_BYTES = 64 * 1024 * 1024;
+
+function describeSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const rounded = value < 10 ? value.toFixed(1) : value.toFixed(0);
+  const trimmed = rounded.endsWith('.0') ? rounded.slice(0, -2) : rounded;
+  return `${trimmed} ${units[unitIndex]}`;
+}
+
+/**
+ * `undefined` when `byteLength` is within the limit this player will read
+ * into memory; otherwise a message naming both the file's size and the
+ * limit, fit to show directly in the status line.
+ */
+export function sizeError(byteLength: number): string | undefined {
+  if (byteLength <= MAX_CONTAINER_BYTES) {
+    return undefined;
+  }
+  return `That file is ${describeSize(byteLength)} — this player only opens files up to ${describeSize(MAX_CONTAINER_BYTES)}.`;
+}
+
 let wasmReady: Promise<void> | undefined;
 
 // A STATIC import, deliberately. @play198x/web's init() resolves its .wasm
@@ -118,10 +209,27 @@ function report(message: string): void {
 /** How the format shown was arrived at, for the note beside the canvas. */
 type Identification = 'certain' | 'probable' | 'manual';
 
-/** The last successfully decoded file's bytes, kept so the format-override
- * <select> in Player.astro can re-decode the same bytes as a different
- * format without asking the visitor to drop the file again. */
-let lastImage: { bytes: Uint8Array; file: File } | undefined;
+/** The last successfully decoded entry's bytes and the label it was read
+ * from, kept so the format-override <select> in Player.astro can re-decode
+ * the same bytes as a different format without asking the visitor to drop
+ * the file again. */
+let lastImage: { bytes: Uint8Array; sourceLabel: string } | undefined;
+
+/** The currently open multi-entry archive, kept resident so clicking
+ * through several entries — a music disk's tunes — reads and probes each
+ * one on demand without re-parsing the whole archive. `undefined` whenever
+ * nothing is open, or the last opened container held exactly one entry (in
+ * which case it was read and freed immediately; there's nothing to browse
+ * back to). Freed and replaced, never left to accumulate, the moment a new
+ * file is dropped — see freeContainer(). */
+let currentContainer: Container | undefined;
+
+function freeContainer(): void {
+  if (currentContainer) {
+    currentContainer.free();
+    currentContainer = undefined;
+  }
+}
 
 function playerElements() {
   const panel = document.getElementById('player-panel');
@@ -206,47 +314,59 @@ const CONFIDENCE_NOTES: Record<Identification, string | undefined> = {
  * and its palette. Also fills the override <select> with every image
  * format this player knows, so a visitor whose file was misidentified —
  * or who just wants to try another reading of it — can correct it.
+ *
+ * Everything shown here — format, dimensions, palette — comes from a single
+ * `image.metadata(sourceLabel)` call, not from separately re-deriving a
+ * dimensions string or palette swatches from `image`'s own raw fields: see
+ * `ImageMeta`'s doc comment in @play198x/web for why a second copy of that
+ * isn't allowed to exist. `IMAGE_FORMATS` stays local even so — it maps
+ * `meta.format`'s short code to an English display string, and English
+ * display copy is this shell's job, not the wasm boundary's.
  */
 function showMetadata(
   els: ReturnType<typeof playerElements>,
-  file: File,
-  format: string,
+  sourceLabel: string,
   identification: Identification,
   image: DecodedImage,
 ): void {
-  if (els.source) {
-    els.source.textContent = file.name || '(unnamed file)';
-  }
-  if (els.format) {
-    els.format.textContent = IMAGE_FORMATS[format] ?? format;
-  }
-  if (els.dimensions) {
-    els.dimensions.textContent = `${image.width} × ${image.height} mode pixels`;
-  }
+  const meta: ImageMeta = image.metadata(sourceLabel);
+  try {
+    if (els.source) {
+      els.source.textContent = meta.source || '(unnamed file)';
+    }
+    if (els.format) {
+      els.format.textContent = IMAGE_FORMATS[meta.format] ?? meta.format;
+    }
+    if (els.dimensions) {
+      els.dimensions.textContent = `${meta.width} × ${meta.height} mode pixels`;
+    }
 
-  const note = CONFIDENCE_NOTES[identification];
-  if (els.confidenceNote) {
-    els.confidenceNote.hidden = !note;
-    els.confidenceNote.textContent = note ?? '';
-  }
+    const note = CONFIDENCE_NOTES[identification];
+    if (els.confidenceNote) {
+      els.confidenceNote.hidden = !note;
+      els.confidenceNote.textContent = note ?? '';
+    }
 
-  if (els.override instanceof HTMLSelectElement) {
-    els.override.replaceChildren(
-      ...Object.entries(IMAGE_FORMATS).map(([key, name]) => {
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = name;
-        option.selected = key === format;
-        return option;
-      }),
-    );
-  }
-  if (els.overrideWrap) {
-    els.overrideWrap.hidden = false;
-  }
+    if (els.override instanceof HTMLSelectElement) {
+      els.override.replaceChildren(
+        ...Object.entries(IMAGE_FORMATS).map(([key, name]) => {
+          const option = document.createElement('option');
+          option.value = key;
+          option.textContent = name;
+          option.selected = key === meta.format;
+          return option;
+        }),
+      );
+    }
+    if (els.overrideWrap) {
+      els.overrideWrap.hidden = false;
+    }
 
-  if (els.palette) {
-    els.palette.replaceChildren(...paletteSwatches(image.palette));
+    if (els.palette) {
+      els.palette.replaceChildren(...paletteSwatches(meta.palette));
+    }
+  } finally {
+    meta.free();
   }
 }
 
@@ -257,8 +377,13 @@ function showMetadata(
  * canvas and metadata are left as they were and the failure is reported
  * through the same status line `onFile` uses — the override control stays
  * visible so the visitor can try something else.
+ *
+ * `sourceLabel` is what's shown as the picture's source and passed to
+ * `image.metadata()` — the outer file's name for a plain drop, or the
+ * entry's own path when it came from inside an archive (see openEntry()),
+ * since "disk.adf" tells a visitor nothing about which tune they picked.
  */
-function decodeAndShow(bytes: Uint8Array, file: File, format: string, identification: Identification): void {
+function decodeAndShow(bytes: Uint8Array, sourceLabel: string, format: string, identification: Identification): void {
   const els = playerElements();
   if (!els.panel || !els.canvas) {
     return;
@@ -266,13 +391,18 @@ function decodeAndShow(bytes: Uint8Array, file: File, format: string, identifica
 
   try {
     const image = decode_image(bytes, format);
-    drawImage(els.canvas, image);
-    showMetadata(els, file, format, identification, image);
+    try {
+      drawImage(els.canvas, image);
+      showMetadata(els, sourceLabel, identification, image);
+    } finally {
+      image.free();
+    }
     els.panel.hidden = false;
-    lastImage = { bytes, file };
-    // onFile already reports the initial identification through classify()'s
-    // message; only an override needs a report here, both to confirm the
-    // redraw and to clear out a stale error from a previous failed attempt.
+    lastImage = { bytes, sourceLabel };
+    // onFile/openEntry already report the initial identification through
+    // classify()'s message; only an override needs a report here, both to
+    // confirm the redraw and to clear out a stale error from a previous
+    // failed attempt.
     if (identification === 'manual') {
       report(`Redrawn as ${IMAGE_FORMATS[format] ?? format}.`);
     }
@@ -290,9 +420,202 @@ function hidePlayer(): void {
   lastImage = undefined;
 }
 
+function archiveListElement(): HTMLElement | undefined {
+  const list = document.getElementById('archive-entries');
+  return list instanceof HTMLElement ? list : undefined;
+}
+
+function hideArchiveList(): void {
+  const list = archiveListElement();
+  if (list) {
+    list.hidden = true;
+    list.replaceChildren();
+  }
+}
+
+/**
+ * Read one entry's bytes, identify them, and either draw them (an image) or
+ * report what they are (audio or unknown — see describeEntry()'s note on
+ * why audio isn't opened yet). Shared by the single-entry path in
+ * openContainer() and by a click on one of several entries in
+ * archiveEntryRow(): picking a second tune from the same disk calls this
+ * exactly the same way the first one did.
+ *
+ * Frees the `Probed` `probe()` hands back as soon as its two fields
+ * (`format`, `confidence`) are read out into plain locals — after that,
+ * everything downstream works from those locals, never from the freed
+ * wasm object.
+ */
+function openEntry(container: Container, path: string, file: File): void {
+  let bytes: Uint8Array;
+  try {
+    bytes = container.read(path);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    report(`Couldn't read "${path}" from ${file.name}: ${detail}`);
+    hidePlayer();
+    return;
+  }
+
+  const probed = probe(bytes);
+  const result = classify(probed, bytes.byteLength);
+  const format = probed?.format;
+  const certain = probed?.confidence === 'certain';
+  probed?.free();
+
+  report(result.message);
+  if (result.route === 'image' && format) {
+    decodeAndShow(bytes, path, format, certain ? 'certain' : 'probable');
+  } else {
+    hidePlayer();
+  }
+}
+
+/**
+ * Build one <li> for DropTarget.astro's archive entry list: a clickable
+ * button naming the entry and what it is when it can be opened, or a
+ * disabled row saying why not when it can't — greyed out rather than left
+ * off the list, so a visitor who dropped a disk expecting a tune can see
+ * the disk holds no tune, which reads differently from an empty list.
+ *
+ * Reads the entry's bytes to probe them (there is no way to know what an
+ * entry is without looking at it), then frees the `Probed` immediately —
+ * the same discipline as openEntry(). The bytes read here are discarded
+ * once probed; a click re-reads them fresh from `container`, which stays
+ * resident for exactly that.
+ */
+function archiveEntryRow(container: Container, path: string, file: File): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'archive-entry';
+
+  let description: EntryDescription;
+  try {
+    const bytes = container.read(path);
+    const probed = probe(bytes);
+    description = describeEntry(probed, bytes.byteLength);
+    probed?.free();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    description = { route: 'unknown', label: `couldn't be read: ${detail}`, openable: false };
+  }
+
+  if (description.openable) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'archive-entry-button';
+    button.textContent = `${path} — ${description.label}`;
+    button.addEventListener('click', () => {
+      // Guards against a stale row from an archive that's since been
+      // replaced by a new drop — freeContainer() clears currentContainer
+      // before this one could ever be read from again.
+      if (currentContainer === container) {
+        openEntry(container, path, file);
+      }
+    });
+    li.appendChild(button);
+  } else {
+    const span = document.createElement('span');
+    span.className = 'archive-entry-disabled';
+    span.setAttribute('aria-disabled', 'true');
+    span.textContent = `${path} — ${description.label}`;
+    li.appendChild(span);
+  }
+
+  return li;
+}
+
+function renderArchiveList(container: Container, file: File): void {
+  const list = archiveListElement();
+  if (!list) {
+    return;
+  }
+
+  const rows: HTMLLIElement[] = [];
+  for (let i = 0; i < container.entry_count; i++) {
+    const path = container.entry_path(i);
+    if (path === undefined) {
+      break;
+    }
+    rows.push(archiveEntryRow(container, path, file));
+  }
+
+  list.replaceChildren(...rows);
+  list.hidden = false;
+}
+
+/**
+ * Decide what to do with a just-opened container: a single entry opens
+ * directly (the common case — most dropped files are plain files, which
+ * `Container` always reports as one entry named by `file.name`); several
+ * entries are listed for the visitor to choose from, because an Amiga disk
+ * holds many modules and picking one for them is picking wrong most of the
+ * time.
+ *
+ * Takes ownership of `container` for the single-entry and empty cases —
+ * both free it before returning, since nothing more will ever be read from
+ * it. The multi-entry case instead hands ownership to `currentContainer`,
+ * kept resident until freeContainer() runs for the next drop.
+ */
+function openContainer(container: Container, file: File): void {
+  hideArchiveList();
+
+  const count = container.entry_count;
+
+  if (count === 0) {
+    report(`${file.name} is an empty archive — there's nothing inside to open.`);
+    hidePlayer();
+    container.free();
+    return;
+  }
+
+  if (count === 1) {
+    const path = container.entry_path(0) ?? file.name;
+    openEntry(container, path, file);
+    container.free();
+    return;
+  }
+
+  currentContainer = container;
+  report(`That's an archive with ${count} entries — pick one below to open it.`);
+  renderArchiveList(container, file);
+}
+
+/**
+ * Read a dropped or picked file and open it. Called identically from both
+ * input paths in DropTarget.astro.
+ *
+ * Every file — plain, ZIP, or Amiga ADF disk image — is opened the same way,
+ * as a `Container`: see openContainer() for what happens next. `file.size`
+ * is checked before `arrayBuffer()` is ever called, so an oversized file is
+ * refused before its bytes are read into memory at all — see
+ * MAX_CONTAINER_BYTES's comment for why that ordering matters.
+ */
+export async function onFile(file: File): Promise<void> {
+  const sizeProblem = sizeError(file.size);
+  if (sizeProblem) {
+    report(sizeProblem);
+    return;
+  }
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  try {
+    await loadWasm();
+    freeContainer();
+    const container = new Container(bytes, file.name);
+    openContainer(container, file);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    report(`Couldn't read that file: ${detail}`);
+    hidePlayer();
+    hideArchiveList();
+  }
+}
+
 /**
  * Wire Player.astro's format-override <select> to re-decode the last shown
- * file's bytes as whatever format the visitor picks. Called once, from
+ * entry's bytes as whatever format the visitor picks. Called once, from
  * Player.astro's own script, at page load — before any file has been
  * dropped, so it only attaches the listener and does nothing until
  * `lastImage` is set by a successful decode.
@@ -307,32 +630,6 @@ export function wireFormatOverride(): void {
     if (!lastImage) {
       return;
     }
-    decodeAndShow(lastImage.bytes, lastImage.file, override.value, 'manual');
+    decodeAndShow(lastImage.bytes, lastImage.sourceLabel, override.value, 'manual');
   });
-}
-
-/**
- * Read a dropped or picked file, identify it, and report where it will go.
- * Called identically from both input paths in DropTarget.astro.
- */
-export async function onFile(file: File): Promise<void> {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-
-  try {
-    await loadWasm();
-    const probed = probe(bytes);
-    const result = classify(probed, bytes.byteLength);
-    report(result.message);
-
-    if (result.route === 'image' && probed) {
-      decodeAndShow(bytes, file, probed.format, probed.confidence === 'certain' ? 'certain' : 'probable');
-    } else {
-      hidePlayer();
-    }
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    report(`Couldn't read that file: ${detail}`);
-    hidePlayer();
-  }
 }
