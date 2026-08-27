@@ -202,7 +202,21 @@ let wasmReady: Promise<void> | undefined;
 // only bring a copy step back if that turns out not to be enough.
 function loadWasm(): Promise<void> {
   if (!wasmReady) {
-    wasmReady = init().then(() => undefined);
+    // Cache the promise, not a settled success: caching a rejection here
+    // would brick the page the first time this fetch hits a transient 503 —
+    // wasmReady would keep handing back the same dead promise forever, even
+    // once the network recovered, because a rejected promise never
+    // re-settles. Clearing the cache on rejection (guarded so a slower,
+    // now-stale attempt can't clobber a newer one that already started) is
+    // what lets the very next drop retry from scratch instead of replaying
+    // the same stale error.
+    const p = init().then(() => undefined);
+    wasmReady = p;
+    p.catch(() => {
+      if (wasmReady === p) {
+        wasmReady = undefined;
+      }
+    });
   }
   return wasmReady;
 }
@@ -252,11 +266,22 @@ let pendingAudioBytes: Uint8Array | undefined;
  * `undefined` before that click and after disposeAudio() runs. */
 let currentAudio: ModulePlaybackHandle | undefined;
 
+/** Bumped by disposeAudio(). handleAudioPlayClick() reads this before its
+ * only `await` (starting playback) and compares it after — a mismatch means
+ * a new drop ran disposeAudio() (via hideAllPanels()) while playback was
+ * still starting, so the handle that just resolved belongs to a tune that's
+ * no longer showing and must be disposed on arrival rather than published as
+ * `currentAudio`. Without this, `currentAudio = handle` after the await could
+ * publish a handle for audio the visitor never sees a transport for — see
+ * handleAudioPlayClick()'s doc. */
+let audioGeneration = 0;
+
 /** Tears down any live playback — idempotent, safe to call whether or not
  * anything is playing. Called before a new entry replaces whatever the
  * audio panel was last showing, the same discipline freeContainer() applies
  * to a stale `Container`. */
 function disposeAudio(): void {
+  audioGeneration += 1;
   if (currentAudio) {
     currentAudio.dispose();
     currentAudio = undefined;
@@ -544,6 +569,15 @@ function showAudioPlayer(bytes: Uint8Array, sourceLabel: string, format: string,
  * already checked, an AudioContext the browser refuses) are shown in the
  * panel's own status line rather than thrown, the same discipline
  * decodeAndShow() applies to a failed image decode.
+ *
+ * `currentAudio = handle` only happens after confirming `audioGeneration`
+ * hasn't moved since this call started. playModule()'s only `await` is
+ * exactly the window a slow wasm/glue fetch leaves open for a new file to be
+ * dropped: onFile → hideAllPanels() → disposeAudio() can run inside it,
+ * bumping `audioGeneration` and hiding the audio panel entirely. Without the
+ * check, the handle that resolves afterwards would still get published as
+ * `currentAudio` — a tune playing with no transport on screen and no way to
+ * stop it. See audioGeneration's own doc.
  */
 async function handleAudioPlayClick(): Promise<void> {
   const els = audioElements();
@@ -568,7 +602,15 @@ async function handleAudioPlayClick(): Promise<void> {
 
   els.playButton.disabled = true;
   try {
+    const token = audioGeneration;
     const handle = await playModule(pendingAudioBytes);
+    if (token !== audioGeneration) {
+      // Superseded while playModule() was still starting — see this
+      // function's doc. Dispose immediately rather than publish it: this is
+      // the only reference to this handle that will ever exist.
+      handle.dispose();
+      return;
+    }
     currentAudio = handle;
     handle.onPosition((position: ModulePosition) => {
       const { position: positionEl } = audioElements();
@@ -802,8 +844,23 @@ export async function onFile(file: File): Promise<void> {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
 
+  // Split deliberately into two try/catches with two different messages.
+  // loadWasm() failing means OUR player asset (the .wasm this page ships)
+  // didn't load — a network blip, not anything wrong with the visitor's
+  // file — so it must not be blamed on "that file". Only a throw from the
+  // second block (reading/opening what the visitor actually dropped) is a
+  // problem with their file.
   try {
     await loadWasm();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    report(`Couldn't load the player: ${detail}. Drop the file again to retry.`);
+    hideAllPanels();
+    hideArchiveList();
+    return;
+  }
+
+  try {
     freeContainer();
     hideAllPanels();
     const container = new Container(bytes, file.name);
