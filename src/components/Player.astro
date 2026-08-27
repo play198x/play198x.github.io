@@ -1,14 +1,18 @@
 ---
 // Draws whatever picture player.ts decoded and shows what is known about
-// it. This component owns no logic of its own — decoding, canvas drawing,
-// metadata formatting and the format-override wiring all live in
-// src/scripts/player.ts, so they can be exercised without a DOM (see
-// tests/decode-image.test.mjs). This file is markup plus the one line that
-// wires the override <select> to that logic.
+// it, and — since Task 8 — offers a Play control for whatever module it
+// identified instead. This component owns no logic of its own — decoding,
+// canvas drawing, metadata formatting, playback and both panels' wiring all
+// live in src/scripts/player.ts (which defers everything about how audio
+// actually plays to src/scripts/audio.ts), so they can be exercised without
+// a DOM (see tests/decode-image.test.mjs). This file is markup plus the
+// lines that wire each panel's controls to that logic.
 //
-// Hidden until src/scripts/player.ts has something to show: a file that
-// doesn't decode to a picture (audio, unknown, or nothing dropped yet)
-// leaves this panel untouched and out of the way.
+// Both panels start hidden until player.ts has something to show for them:
+// a file that decodes to neither a picture nor a module (unknown, or
+// nothing dropped yet) leaves both untouched and out of the way. Exactly
+// one is ever shown at a time — see hideAllPanels()/hidePlayer()/
+// hideAudioPlayer() in player.ts.
 ---
 
 <section id="player-panel" class="player-panel" hidden>
@@ -45,10 +49,33 @@
   </div>
 </section>
 
+<section id="audio-player-panel" class="player-panel" hidden>
+  <div class="player-info">
+    <dl class="player-meta">
+      <dt>Name</dt>
+      <dd id="audio-name"></dd>
+      <dt>Format</dt>
+      <dd id="audio-format"></dd>
+      <dt>Length</dt>
+      <dd id="audio-length"></dd>
+    </dl>
+
+    <!-- Starting an AudioContext has to happen inside this button's own
+         click handler — see src/scripts/audio.ts's playModule() doc — so
+         nothing plays until it's pressed, even though the module's name,
+         format and length are already shown above. -->
+    <button id="audio-play-button" type="button" class="audio-play-button">Play</button>
+
+    <p id="audio-position" class="audio-position" role="status" aria-live="polite"></p>
+    <p id="audio-status" class="audio-status" role="alert"></p>
+  </div>
+</section>
+
 <script>
-  import { wireFormatOverride } from '../scripts/player';
+  import { wireFormatOverride, wireAudioPlayer } from '../scripts/player';
 
   wireFormatOverride();
+  wireAudioPlayer();
 </script>
 
 <style>
@@ -155,5 +182,41 @@
     height: 1.1rem;
     border: 1px solid var(--h-line-soft);
     border-radius: 2px;
+  }
+
+  .audio-play-button {
+    align-self: flex-start;
+    padding: 0.5rem 1.25rem;
+    border: 1px solid var(--h-line);
+    border-radius: 6px;
+    background: var(--h-ground);
+    color: var(--h-ink-body);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .audio-play-button:hover,
+  .audio-play-button:focus-visible {
+    border-color: var(--h-accent);
+    background: var(--h-surface-light);
+  }
+
+  .audio-play-button:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  .audio-position {
+    margin: 0;
+    font-family: var(--h-font-mono);
+    font-size: 0.9em;
+    color: var(--h-ink-muted);
+    min-height: 1.2em;
+  }
+
+  .audio-status {
+    margin: 0;
+    font-size: 0.9em;
+    color: var(--h-ink-body);
   }
 </style>
