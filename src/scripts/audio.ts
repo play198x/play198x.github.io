@@ -198,7 +198,7 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
     switch (data && data.type) {
       case 'init': {
         try {
-          initSync(new Uint8Array(data.wasmBytes));
+          initSync({ module: new Uint8Array(data.wasmBytes) });
           this.player = new ModulePlayer(new Uint8Array(data.moduleBytes), sampleRate);
           this.quantum = ModulePlayer.renderQuantum();
           this.refreshViews();
@@ -363,32 +363,50 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
   let playing = false;
   let disposed = false;
 
-  node.port.onmessage = (event: MessageEvent) => {
-    const data = event.data as
-      | { type: 'position'; order: number; pattern: number; row: number; tick: number }
-      | { type: 'heartbeat'; calls: number; glitches: number; maxGapMs: number }
-      | { type: 'ready' }
-      | { type: 'error'; message: string };
-    if (data.type === 'position') {
-      const position: ModulePosition = { order: data.order, pattern: data.pattern, row: data.row, tick: data.tick };
-      for (const listener of positionListeners) {
-        listener(position);
+  // Resolves once the worklet's own `ModulePlayer` has actually been built;
+  // rejects with the worklet's own message if it hasn't. Bytes that pass
+  // probe()'s lighter magic-number check (see player.ts) can still fail the
+  // real parse inside `new ModulePlayer(...)` — an unsupported channel
+  // count (`6CHN`/`8CHN`/`FLT8` pass the magic check but are rejected by
+  // the decoder), for one concrete, reachable example. That failure
+  // happens entirely inside the worklet. Without waiting for this,
+  // playModule() resolved the instant it posted the init message: a failed
+  // module still handed the caller a "working" handle, the Play button
+  // still flipped to Pause, and the only sign anything was wrong was a
+  // console.error nobody but a developer would see. Waiting for `ready`
+  // turns a real failure into a rejected promise here, which
+  // handleAudioPlayClick()'s existing catch already surfaces in the status
+  // line — no second error channel needed.
+  const ready = new Promise<void>((resolve, reject) => {
+    node.port.onmessage = (event: MessageEvent) => {
+      const data = event.data as
+        | { type: 'position'; order: number; pattern: number; row: number; tick: number }
+        | { type: 'heartbeat'; calls: number; glitches: number; maxGapMs: number }
+        | { type: 'ready' }
+        | { type: 'error'; message: string };
+      if (data.type === 'position') {
+        const position: ModulePosition = { order: data.order, pattern: data.pattern, row: data.row, tick: data.tick };
+        for (const listener of positionListeners) {
+          listener(position);
+        }
+      } else if (data.type === 'ready') {
+        // Marks the moment the worklet's own ModulePlayer finished
+        // construction — the next process() call renders real audio rather
+        // than the pre-init silence. Logged for the same reason the
+        // heartbeat is: whoever is verifying playback with devtools open.
+        console.debug('[play198x audio] worklet ready');
+        resolve();
+      } else if (data.type === 'heartbeat') {
+        // A cheap, permanent health signal — see this file's header comment
+        // and AudioHeartbeat's doc. Nothing in the UI reads this; it's here
+        // for whoever is verifying playback with devtools open.
+        console.debug('[play198x audio] heartbeat', data satisfies AudioHeartbeat);
+      } else if (data.type === 'error') {
+        console.error('[play198x audio] worklet failed to start the module:', data.message);
+        reject(new Error(data.message));
       }
-    } else if (data.type === 'ready') {
-      // Marks the moment the worklet's own ModulePlayer finished
-      // construction — the next process() call renders real audio rather
-      // than the pre-init silence. Logged for the same reason the
-      // heartbeat is: whoever is verifying playback with devtools open.
-      console.debug('[play198x audio] worklet ready');
-    } else if (data.type === 'heartbeat') {
-      // A cheap, permanent health signal — see this file's header comment
-      // and AudioHeartbeat's doc. Nothing in the UI reads this; it's here
-      // for whoever is verifying playback with devtools open.
-      console.debug('[play198x audio] heartbeat', data satisfies AudioHeartbeat);
-    } else if (data.type === 'error') {
-      console.error('[play198x audio] worklet failed to start the module:', data.message);
-    }
-  };
+    };
+  });
 
   // Transfer *copies* of both buffers: the worklet takes ownership (a
   // transfer detaches what it's given), and this file's own cached
@@ -399,6 +417,19 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
     wasmBytesCopy,
     moduleBytesCopy,
   ]);
+
+  try {
+    await ready;
+  } catch (error) {
+    // The worklet never got a playable module — nothing to render, nothing
+    // to tear down on its side. Close this context rather than leave an
+    // AudioContext with a dead node sitting around; the caller gets a
+    // rejected promise and never sees a handle for a player that can't play.
+    node.port.onmessage = null;
+    node.disconnect();
+    void audioContext.close();
+    throw error;
+  }
 
   node.connect(audioContext.destination);
   playing = true;
