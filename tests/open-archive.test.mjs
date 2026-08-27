@@ -217,7 +217,7 @@ test('describeEntry, fed real probe() output for each zip entry, matches what th
   assert.equal(scrResult.openable, true);
 
   assert.equal(tuneResult.route, 'audio');
-  assert.equal(tuneResult.openable, false);
+  assert.equal(tuneResult.openable, true);
 
   assert.equal(readmeResult.route, 'unknown');
   assert.equal(readmeResult.openable, false);

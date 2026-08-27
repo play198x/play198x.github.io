@@ -14,10 +14,16 @@
 // visitor to pick from, each one probed so the list says what it is, with
 // what cannot be opened greyed out rather than hidden.
 //
-// Playing a module is Task 8 — nothing here touches audio bytes, so a
-// ProTracker entry is identified but never marked openable yet.
+// Task 8 adds the audio path: a ProTracker entry is now openable. Opening
+// one shows its name and size beside a Play control in Player.astro's audio
+// panel — it does not start an `AudioContext` until that control is
+// pressed, because browsers refuse to let one produce sound outside a user
+// gesture. Everything past that click is src/scripts/audio.ts's job; this
+// file only ever holds a `ModulePlaybackHandle`, never an `AudioContext`, a
+// wasm byte, or a worklet message.
 
 import init, { decode_image, probe, Container, type DecodedImage, type ImageMeta } from '@play198x/web';
+import { playModule, type ModulePlaybackHandle, type ModulePosition } from './audio.ts';
 
 export type Route = 'image' | 'audio' | 'unknown';
 
@@ -103,9 +109,9 @@ export interface EntryDescription {
  * same logic — but writes a label sized for a list row rather than a full
  * sentence.
  *
- * Only the `image` route is openable: audio playback (Task 8) doesn't exist
- * yet, so a recognised ProTracker module is named honestly rather than
- * offered as something this player can actually do yet.
+ * Both `image` and `audio` routes are openable: Task 8 wires up playback,
+ * so a recognised ProTracker module is offered the same way a recognised
+ * picture is.
  */
 export function describeEntry(probed: ProbeResult | undefined, byteLength: number): EntryDescription {
   const { route } = classify(probed, byteLength);
@@ -117,7 +123,7 @@ export function describeEntry(probed: ProbeResult | undefined, byteLength: numbe
 
   if (route === 'audio' && probed) {
     const qualifier = probed.confidence === 'certain' ? '' : 'probably ';
-    return { route, label: `${qualifier}${AUDIO_FORMATS[probed.format]} — playback isn't wired up yet`, openable: false };
+    return { route, label: `${qualifier}${AUDIO_FORMATS[probed.format]}`, openable: true };
   }
 
   if (probed) {
@@ -233,6 +239,31 @@ function freeContainer(): void {
   }
 }
 
+/** Bytes for an identified ProTracker entry, held until the visitor presses
+ * Play — src/scripts/audio.ts's `playModule()` must run inside that click's
+ * own call stack, so nothing here starts an `AudioContext` before then.
+ * `undefined` once playback has actually started (see currentAudio below)
+ * or whenever nothing audio is showing. */
+let pendingAudioBytes: Uint8Array | undefined;
+
+/** The handle audio.ts hands back once the visitor has pressed Play — the
+ * only thing in this file that touches a live `AudioContext`, and even this
+ * only through the handle's play/pause/dispose methods, never directly.
+ * `undefined` before that click and after disposeAudio() runs. */
+let currentAudio: ModulePlaybackHandle | undefined;
+
+/** Tears down any live playback — idempotent, safe to call whether or not
+ * anything is playing. Called before a new entry replaces whatever the
+ * audio panel was last showing, the same discipline freeContainer() applies
+ * to a stale `Container`. */
+function disposeAudio(): void {
+  if (currentAudio) {
+    currentAudio.dispose();
+    currentAudio = undefined;
+  }
+  pendingAudioBytes = undefined;
+}
+
 function playerElements() {
   const panel = document.getElementById('player-panel');
   const canvas = document.getElementById('player-canvas');
@@ -246,6 +277,20 @@ function playerElements() {
     overrideWrap: document.getElementById('player-override-wrap'),
     override: document.getElementById('player-override'),
     palette: document.getElementById('player-palette'),
+  };
+}
+
+function audioElements() {
+  const panel = document.getElementById('audio-player-panel');
+  const playButton = document.getElementById('audio-play-button');
+  return {
+    panel: panel instanceof HTMLElement ? panel : undefined,
+    name: document.getElementById('audio-name'),
+    format: document.getElementById('audio-format'),
+    length: document.getElementById('audio-length'),
+    playButton: playButton instanceof HTMLButtonElement ? playButton : undefined,
+    position: document.getElementById('audio-position'),
+    status: document.getElementById('audio-status'),
   };
 }
 
@@ -422,6 +467,141 @@ function hidePlayer(): void {
   lastImage = undefined;
 }
 
+function hideAudioPlayer(): void {
+  disposeAudio();
+  const { panel } = audioElements();
+  if (panel) {
+    panel.hidden = true;
+  }
+}
+
+/** Hides both panels at once — used whenever what's coming next isn't known
+ * to be a picture or a module yet (an unrecognised entry, an empty archive,
+ * a file that failed to read at all). */
+function hideAllPanels(): void {
+  hidePlayer();
+  hideAudioPlayer();
+}
+
+function setPlayButtonLabel(label: string): void {
+  const { playButton } = audioElements();
+  if (playButton) {
+    playButton.textContent = label;
+  }
+}
+
+/**
+ * Show a just-identified ProTracker entry: its name, format and size beside
+ * a Play control — but hold its bytes rather than start anything. Starting
+ * an `AudioContext` has to happen inside the Play button's own click
+ * handler (see handleAudioPlayClick()), not here, or the browser refuses to
+ * let it produce sound.
+ *
+ * `byteLength` stands in for the "length" a visitor would expect from a
+ * player: `@play198x/web` 0.1.2 has no song-title or duration getter on
+ * `ModulePlayer` (only live playback position — order/pattern/row/tick),
+ * so there is nothing truer to show yet. This mirrors the file-size wording
+ * classify() already uses in the status line above the drop target.
+ */
+function showAudioPlayer(bytes: Uint8Array, sourceLabel: string, format: string, certain: boolean): void {
+  hidePlayer();
+  disposeAudio();
+  pendingAudioBytes = bytes;
+
+  const els = audioElements();
+  if (!els.panel) {
+    return;
+  }
+
+  if (els.name) {
+    els.name.textContent = sourceLabel;
+  }
+  if (els.format) {
+    const qualifier = certain ? '' : 'probably ';
+    els.format.textContent = `${qualifier}${AUDIO_FORMATS[format] ?? format}`;
+  }
+  if (els.length) {
+    els.length.textContent = describeSize(bytes.byteLength);
+  }
+  if (els.position) {
+    els.position.textContent = '';
+  }
+  if (els.status) {
+    els.status.textContent = '';
+  }
+  setPlayButtonLabel('Play');
+  if (els.playButton) {
+    els.playButton.disabled = false;
+  }
+  els.panel.hidden = false;
+}
+
+/**
+ * The Play button's click handler: starts playback on the first press
+ * (inside this very call stack, satisfying the user-gesture requirement —
+ * see audio.ts's playModule() doc), toggles play/pause on every press after
+ * that. Errors from playModule() (a malformed module past what probe()
+ * already checked, an AudioContext the browser refuses) are shown in the
+ * panel's own status line rather than thrown, the same discipline
+ * decodeAndShow() applies to a failed image decode.
+ */
+async function handleAudioPlayClick(): Promise<void> {
+  const els = audioElements();
+  if (!els.playButton) {
+    return;
+  }
+
+  if (currentAudio) {
+    if (currentAudio.playing) {
+      currentAudio.pause();
+      setPlayButtonLabel('Play');
+    } else {
+      currentAudio.play();
+      setPlayButtonLabel('Pause');
+    }
+    return;
+  }
+
+  if (!pendingAudioBytes) {
+    return;
+  }
+
+  els.playButton.disabled = true;
+  try {
+    const handle = await playModule(pendingAudioBytes);
+    currentAudio = handle;
+    handle.onPosition((position: ModulePosition) => {
+      const { position: positionEl } = audioElements();
+      if (positionEl) {
+        positionEl.textContent = `Order ${position.order}, pattern ${position.pattern}, row ${position.row}`;
+      }
+    });
+    setPlayButtonLabel('Pause');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (els.status) {
+      els.status.textContent = `Couldn't start playback: ${detail}`;
+    }
+  } finally {
+    els.playButton.disabled = false;
+  }
+}
+
+/**
+ * Wire Player.astro's Play button to handleAudioPlayClick(). Called once,
+ * from Player.astro's own script, at page load — mirrors
+ * wireFormatOverride() below.
+ */
+export function wireAudioPlayer(): void {
+  const { playButton } = audioElements();
+  if (!playButton) {
+    return;
+  }
+  playButton.addEventListener('click', () => {
+    void handleAudioPlayClick();
+  });
+}
+
 function archiveListElement(): HTMLElement | undefined {
   const list = document.getElementById('archive-entries');
   return list instanceof HTMLElement ? list : undefined;
@@ -436,9 +616,9 @@ function hideArchiveList(): void {
 }
 
 /**
- * Read one entry's bytes, identify them, and either draw them (an image) or
- * report what they are (audio or unknown — see describeEntry()'s note on
- * why audio isn't opened yet). Shared by the single-entry path in
+ * Read one entry's bytes, identify them, and open them: draw an image or
+ * show an audio entry's Play control, reporting what an unrecognised entry
+ * is without opening anything. Shared by the single-entry path in
  * openContainer() and by a click on one of several entries in
  * archiveEntryRow(): picking a second tune from the same disk calls this
  * exactly the same way the first one did.
@@ -455,7 +635,7 @@ function openEntry(container: Container, path: string, file: File): void {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     report(`Couldn't read "${path}" from ${file.name}: ${detail}`);
-    hidePlayer();
+    hideAllPanels();
     return;
   }
 
@@ -467,9 +647,12 @@ function openEntry(container: Container, path: string, file: File): void {
 
   report(result.message);
   if (result.route === 'image' && format) {
+    hideAudioPlayer();
     decodeAndShow(bytes, path, format, certain ? 'certain' : 'probable');
+  } else if (result.route === 'audio' && format) {
+    showAudioPlayer(bytes, path, format, certain);
   } else {
-    hidePlayer();
+    hideAllPanels();
   }
 }
 
@@ -570,14 +753,14 @@ function openContainer(container: Container, file: File): void {
 
   // Both branches below own `container` outright and must free it before
   // returning — in `finally`, not after a plain call, so a throw from
-  // report()/hidePlayer()/openEntry() can't leak up to 64 MiB of wasm
+  // report()/hideAllPanels()/openEntry() can't leak up to 64 MiB of wasm
   // memory. The single-entry branch is the common path (a plain dropped
   // file is always a one-entry container), not an edge case, so this
   // matters on every ordinary drop, not just archives.
   if (count === 0) {
     try {
       report(`${file.name} is an empty archive — there's nothing inside to open.`);
-      hidePlayer();
+      hideAllPanels();
     } finally {
       container.free();
     }
@@ -622,12 +805,13 @@ export async function onFile(file: File): Promise<void> {
   try {
     await loadWasm();
     freeContainer();
+    hideAllPanels();
     const container = new Container(bytes, file.name);
     openContainer(container, file);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     report(`Couldn't read that file: ${detail}`);
-    hidePlayer();
+    hideAllPanels();
     hideArchiveList();
   }
 }

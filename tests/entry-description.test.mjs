@@ -22,13 +22,19 @@ test('a probable (not certain) image entry says so in its label', () => {
   assert.match(result.label, /^probably /);
 });
 
-test('an audio-format entry is named but not openable — no player exists yet', () => {
+test('an audio-format entry is openable, with a friendly label', () => {
   const result = describeEntry({ format: 'protracker', confidence: 'certain' }, 1084);
 
   assert.equal(result.route, 'audio');
-  assert.equal(result.openable, false);
+  assert.equal(result.openable, true);
   assert.match(result.label, /ProTracker module/);
-  assert.match(result.label, /playback isn't wired up yet/);
+});
+
+test('a probable (not certain) audio entry says so in its label', () => {
+  const result = describeEntry({ format: 'protracker', confidence: 'probable' }, 1084);
+
+  assert.equal(result.openable, true);
+  assert.match(result.label, /^probably /);
 });
 
 test('a recognised-but-unrouted format is named but not openable', () => {
