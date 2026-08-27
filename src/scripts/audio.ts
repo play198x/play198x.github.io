@@ -305,7 +305,14 @@ function wasmGlueUrl(): URL {
 // between plays, only the module bytes handed to it per play do.
 async function buildWorkletModuleUrl(): Promise<string> {
   if (!workletModuleUrlPromise) {
-    workletModuleUrlPromise = (async () => {
+    // Cache the promise, not a settled success — see loadWasmBytes() below
+    // and player.ts's loadWasm() for the same fix against the same failure:
+    // caching a rejection here means one 503 on the glue bricks audio for
+    // the rest of the session, because a rejected promise never re-settles
+    // and every later play() would just replay this same dead promise. The
+    // `p` indirection guards a race where a second, slower call already
+    // replaced this one before it rejects.
+    const p = (async () => {
       const glueResponse = await fetch(wasmGlueUrl());
       if (!glueResponse.ok) {
         throw new Error(`Couldn't fetch the audio engine (${glueResponse.status}).`);
@@ -315,6 +322,12 @@ async function buildWorkletModuleUrl(): Promise<string> {
       const blob = new Blob([combined], { type: 'application/javascript' });
       return URL.createObjectURL(blob);
     })();
+    workletModuleUrlPromise = p;
+    p.catch(() => {
+      if (workletModuleUrlPromise === p) {
+        workletModuleUrlPromise = undefined;
+      }
+    });
   }
   return workletModuleUrlPromise;
 }
@@ -327,11 +340,19 @@ let wasmBytesPromise: Promise<ArrayBuffer> | undefined;
 // module a visitor drops would be wasteful when a slice is nearly free.
 async function loadWasmBytes(): Promise<ArrayBuffer> {
   if (!wasmBytesPromise) {
-    wasmBytesPromise = fetch(wasmBinaryUrl()).then((response) => {
+    // See buildWorkletModuleUrl() above for why the cache must clear itself
+    // on rejection rather than pin a dead promise forever.
+    const p = fetch(wasmBinaryUrl()).then((response) => {
       if (!response.ok) {
         throw new Error(`Couldn't fetch the audio engine's wasm (${response.status}).`);
       }
       return response.arrayBuffer();
+    });
+    wasmBytesPromise = p;
+    p.catch(() => {
+      if (wasmBytesPromise === p) {
+        wasmBytesPromise = undefined;
+      }
     });
   }
   return wasmBytesPromise;
@@ -349,185 +370,210 @@ async function loadWasmBytes(): Promise<ArrayBuffer> {
 export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandle> {
   const audioContext = new AudioContext();
 
-  const moduleUrl = await buildWorkletModuleUrl();
-  await audioContext.audioWorklet.addModule(moduleUrl);
-
-  const wasmBytes = await loadWasmBytes();
-  const node = new AudioWorkletNode(audioContext, PROCESSOR_NAME, {
-    numberOfInputs: 0,
-    numberOfOutputs: 1,
-    outputChannelCount: [2],
-  });
-
-  const positionListeners = new Set<(position: ModulePosition) => void>();
-  let playing = false;
-  let disposed = false;
-
-  // Resolves once the worklet's own `ModulePlayer` has actually been built;
-  // rejects with the worklet's own message if it hasn't. Bytes that pass
-  // probe()'s lighter magic-number check (see player.ts) can still fail the
-  // real parse inside `new ModulePlayer(...)` — an unsupported channel
-  // count (`6CHN`/`8CHN`/`FLT8` pass the magic check but are rejected by
-  // the decoder), for one concrete, reachable example. That failure
-  // happens entirely inside the worklet. Without waiting for this,
-  // playModule() resolved the instant it posted the init message: a failed
-  // module still handed the caller a "working" handle, the Play button
-  // still flipped to Pause, and the only sign anything was wrong was a
-  // console.error nobody but a developer would see. Waiting for `ready`
-  // turns a real failure into a rejected promise here, which
-  // handleAudioPlayClick()'s existing catch already surfaces in the status
-  // line — no second error channel needed.
-  // Two guards below close a hang the message-based confirmation above
-  // still leaves open. The two *known* failures are covered only by
-  // accident of where they happen to occur: a worklet whose module fails
-  // to evaluate makes `new AudioWorkletNode(...)` throw synchronously
-  // (already surfaced, further up), and a `ModulePlayer` constructor
-  // failure is caught by the processor's own try/catch and turned into an
-  // `error` message (handled below). Neither guard defends a processor
-  // whose constructor throws *before* `this.port.onmessage` is assigned,
-  // or a message that is otherwise dropped — then nothing ever arrives,
-  // `ready` never settles, and the Play button would sit disabled forever
-  // with no status line: the same silent failure this file exists to
-  // replace, just relocated.
-  //
-  // `READY_TIMEOUT_MS` covers the gap: instantiating this wasm and
-  // constructing a `ModulePlayer` from it is single-digit-to-low-double-
-  // digit milliseconds in practice (measured end-to-end, including
-  // `AudioContext`/`addModule`/fetch on top of this step, at 16-44ms — see
-  // task-8-report.md), so 3 seconds is generous headroom between "a slow
-  // device doing honest work" and "nothing is ever coming."
-  // `onprocessorerror` is the direct signal for the case the timeout would
-  // otherwise catch only late and vaguely — it exists precisely for a
-  // processor that throws during construction or processing — so it's
-  // taken first when both could apply. Either guard rejects into the exact
-  // same path `error` already uses, so a visitor sees identical behaviour
-  // (the status line, the button staying "Play") whichever one fires.
-  const READY_TIMEOUT_MS = 3000;
-  let settled = false;
-  const ready = new Promise<void>((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(
-        new Error(
-          `The audio worklet never confirmed it started (no 'ready' or 'error' message within ${READY_TIMEOUT_MS}ms).`,
-        ),
-      );
-    }, READY_TIMEOUT_MS);
-
-    const settleResolve = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      resolve();
-    };
-    const settleReject = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      reject(error);
-    };
-
-    node.port.onmessage = (event: MessageEvent) => {
-      const data = event.data as
-        | { type: 'position'; order: number; pattern: number; row: number; tick: number }
-        | { type: 'heartbeat'; calls: number; glitches: number; maxGapMs: number }
-        | { type: 'ready' }
-        | { type: 'error'; message: string };
-      if (data.type === 'position') {
-        const position: ModulePosition = { order: data.order, pattern: data.pattern, row: data.row, tick: data.tick };
-        for (const listener of positionListeners) {
-          listener(position);
-        }
-      } else if (data.type === 'ready') {
-        // Marks the moment the worklet's own ModulePlayer finished
-        // construction — the next process() call renders real audio rather
-        // than the pre-init silence. Logged for the same reason the
-        // heartbeat is: whoever is verifying playback with devtools open.
-        console.debug('[play198x audio] worklet ready');
-        settleResolve();
-      } else if (data.type === 'heartbeat') {
-        // A cheap, permanent health signal — see this file's header comment
-        // and AudioHeartbeat's doc. Nothing in the UI reads this; it's here
-        // for whoever is verifying playback with devtools open.
-        console.debug('[play198x audio] heartbeat', data satisfies AudioHeartbeat);
-      } else if (data.type === 'error') {
-        console.error('[play198x audio] worklet failed to start the module:', data.message);
-        settleReject(new Error(data.message));
-      }
-    };
-
-    // Fires for a processor that throws during construction or
-    // processing — including, notably, before it ever assigns
-    // `this.port.onmessage`, which is exactly the gap the timeout above
-    // would otherwise have to catch blind. The event carries no reliable
-    // detail across the worklet boundary in every engine, so the message
-    // says what's known (a processor error occurred) rather than
-    // fabricating specifics the event doesn't actually provide.
-    node.onprocessorerror = (event) => {
-      console.error('[play198x audio] worklet processor error', event);
-      settleReject(new Error('The audio worklet processor failed unexpectedly.'));
-    };
-  });
-
-  // Transfer *copies* of both buffers: the worklet takes ownership (a
-  // transfer detaches what it's given), and this file's own cached
-  // `wasmBytes` above needs to survive for the next play() call.
-  const wasmBytesCopy = wasmBytes.slice(0);
-  const moduleBytesCopy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  node.port.postMessage({ type: 'init', wasmBytes: wasmBytesCopy, moduleBytes: moduleBytesCopy }, [
-    wasmBytesCopy,
-    moduleBytesCopy,
-  ]);
-
+  // Everything from here to the `return` below runs inside this try: the
+  // context is created (necessarily, to stay inside the click's call stack —
+  // see this function's own doc), but nothing has taken ownership of closing
+  // it yet. A throw anywhere in this block — buildWorkletModuleUrl()'s fetch,
+  // addModule(), loadWasmBytes()'s fetch, `new AudioWorkletNode` — used to
+  // escape with the context still open: it was only ever closed on a
+  // rejected `ready`, further down, which is a small slice of everything
+  // that can go wrong here. Measured: 8 failed Play presses left 8
+  // `AudioContext`s in `state: "running"`, none closed, each holding a
+  // render thread and an output stream open for the tab's whole life. The
+  // outer catch below is the single place that closes it for every failure
+  // in this block, so no future addition here can reopen the leak by
+  // forgetting its own cleanup.
   try {
-    await ready;
-  } catch (error) {
-    // The worklet never got a playable module — nothing to render, nothing
-    // to tear down on its side. Close this context rather than leave an
-    // AudioContext with a dead node sitting around; the caller gets a
-    // rejected promise and never sees a handle for a player that can't play.
-    node.port.onmessage = null;
-    node.onprocessorerror = null;
-    node.disconnect();
-    void audioContext.close();
-    throw error;
-  }
+    const moduleUrl = await buildWorkletModuleUrl();
+    await audioContext.audioWorklet.addModule(moduleUrl);
 
-  node.connect(audioContext.destination);
-  playing = true;
+    const wasmBytes = await loadWasmBytes();
+    const node = new AudioWorkletNode(audioContext, PROCESSOR_NAME, {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
 
-  return {
-    play() {
-      if (disposed) return;
-      playing = true;
-      node.port.postMessage({ type: 'play' });
-    },
-    pause() {
-      if (disposed) return;
-      playing = false;
-      node.port.postMessage({ type: 'pause' });
-    },
-    get playing() {
-      return playing;
-    },
-    seekOrder(order: number) {
-      if (disposed) return;
-      node.port.postMessage({ type: 'seek', order });
-    },
-    onPosition(listener: (position: ModulePosition) => void) {
-      positionListeners.add(listener);
-      return () => positionListeners.delete(listener);
-    },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      positionListeners.clear();
-      node.port.postMessage({ type: 'dispose' });
+    const positionListeners = new Set<(position: ModulePosition) => void>();
+    let playing = false;
+    let disposed = false;
+
+    // Resolves once the worklet's own `ModulePlayer` has actually been built;
+    // rejects with the worklet's own message if it hasn't. Bytes that pass
+    // probe()'s lighter magic-number check (see player.ts) can still fail the
+    // real parse inside `new ModulePlayer(...)` — an unsupported channel
+    // count (`6CHN`/`8CHN`/`FLT8` pass the magic check but are rejected by
+    // the decoder), for one concrete, reachable example. That failure
+    // happens entirely inside the worklet. Without waiting for this,
+    // playModule() resolved the instant it posted the init message: a failed
+    // module still handed the caller a "working" handle, the Play button
+    // still flipped to Pause, and the only sign anything was wrong was a
+    // console.error nobody but a developer would see. Waiting for `ready`
+    // turns a real failure into a rejected promise here, which
+    // handleAudioPlayClick()'s existing catch already surfaces in the status
+    // line — no second error channel needed.
+    // Two guards below close a hang the message-based confirmation above
+    // still leaves open. The two *known* failures are covered only by
+    // accident of where they happen to occur: a worklet whose module fails
+    // to evaluate makes `new AudioWorkletNode(...)` throw synchronously
+    // (already surfaced, further up), and a `ModulePlayer` constructor
+    // failure is caught by the processor's own try/catch and turned into an
+    // `error` message (handled below). Neither guard defends a processor
+    // whose constructor throws *before* `this.port.onmessage` is assigned,
+    // or a message that is otherwise dropped — then nothing ever arrives,
+    // `ready` never settles, and the Play button would sit disabled forever
+    // with no status line: the same silent failure this file exists to
+    // replace, just relocated.
+    //
+    // `READY_TIMEOUT_MS` covers the gap: instantiating this wasm and
+    // constructing a `ModulePlayer` from it is single-digit-to-low-double-
+    // digit milliseconds in practice (measured end-to-end, including
+    // `AudioContext`/`addModule`/fetch on top of this step, at 16-44ms — see
+    // task-8-report.md), so 3 seconds is generous headroom between "a slow
+    // device doing honest work" and "nothing is ever coming."
+    // `onprocessorerror` is the direct signal for the case the timeout would
+    // otherwise catch only late and vaguely — it exists precisely for a
+    // processor that throws during construction or processing — so it's
+    // taken first when both could apply. Either guard rejects into the exact
+    // same path `error` already uses, so a visitor sees identical behaviour
+    // (the status line, the button staying "Play") whichever one fires.
+    const READY_TIMEOUT_MS = 3000;
+    let settled = false;
+    const ready = new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(
+          new Error(
+            `The audio worklet never confirmed it started (no 'ready' or 'error' message within ${READY_TIMEOUT_MS}ms).`,
+          ),
+        );
+      }, READY_TIMEOUT_MS);
+
+      const settleResolve = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      const settleReject = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(error);
+      };
+
+      node.port.onmessage = (event: MessageEvent) => {
+        const data = event.data as
+          | { type: 'position'; order: number; pattern: number; row: number; tick: number }
+          | { type: 'heartbeat'; calls: number; glitches: number; maxGapMs: number }
+          | { type: 'ready' }
+          | { type: 'error'; message: string };
+        if (data.type === 'position') {
+          const position: ModulePosition = { order: data.order, pattern: data.pattern, row: data.row, tick: data.tick };
+          for (const listener of positionListeners) {
+            listener(position);
+          }
+        } else if (data.type === 'ready') {
+          // Marks the moment the worklet's own ModulePlayer finished
+          // construction — the next process() call renders real audio rather
+          // than the pre-init silence. Logged for the same reason the
+          // heartbeat is: whoever is verifying playback with devtools open.
+          console.debug('[play198x audio] worklet ready');
+          settleResolve();
+        } else if (data.type === 'heartbeat') {
+          // A cheap, permanent health signal — see this file's header comment
+          // and AudioHeartbeat's doc. Nothing in the UI reads this; it's here
+          // for whoever is verifying playback with devtools open.
+          console.debug('[play198x audio] heartbeat', data satisfies AudioHeartbeat);
+        } else if (data.type === 'error') {
+          console.error('[play198x audio] worklet failed to start the module:', data.message);
+          settleReject(new Error(data.message));
+        }
+      };
+
+      // Fires for a processor that throws during construction or
+      // processing — including, notably, before it ever assigns
+      // `this.port.onmessage`, which is exactly the gap the timeout above
+      // would otherwise have to catch blind. The event carries no reliable
+      // detail across the worklet boundary in every engine, so the message
+      // says what's known (a processor error occurred) rather than
+      // fabricating specifics the event doesn't actually provide.
+      node.onprocessorerror = (event) => {
+        console.error('[play198x audio] worklet processor error', event);
+        settleReject(new Error('The audio worklet processor failed unexpectedly.'));
+      };
+    });
+
+    // Transfer *copies* of both buffers: the worklet takes ownership (a
+    // transfer detaches what it's given), and this file's own cached
+    // `wasmBytes` above needs to survive for the next play() call.
+    const wasmBytesCopy = wasmBytes.slice(0);
+    const moduleBytesCopy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    node.port.postMessage({ type: 'init', wasmBytes: wasmBytesCopy, moduleBytes: moduleBytesCopy }, [
+      wasmBytesCopy,
+      moduleBytesCopy,
+    ]);
+
+    try {
+      await ready;
+    } catch (error) {
+      // The worklet never got a playable module — nothing to render, nothing
+      // to tear down on its side. Detach from it (the outer catch below
+      // closes the `AudioContext` itself, along with every other failure in
+      // this block) rather than leave the node listening for messages that
+      // will never help.
       node.port.onmessage = null;
       node.onprocessorerror = null;
       node.disconnect();
-      void audioContext.close();
-    },
-  };
+      throw error;
+    }
+
+    node.connect(audioContext.destination);
+    playing = true;
+
+    return {
+      play() {
+        if (disposed) return;
+        playing = true;
+        node.port.postMessage({ type: 'play' });
+      },
+      pause() {
+        if (disposed) return;
+        playing = false;
+        node.port.postMessage({ type: 'pause' });
+      },
+      get playing() {
+        return playing;
+      },
+      seekOrder(order: number) {
+        if (disposed) return;
+        node.port.postMessage({ type: 'seek', order });
+      },
+      onPosition(listener: (position: ModulePosition) => void) {
+        positionListeners.add(listener);
+        return () => positionListeners.delete(listener);
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        positionListeners.clear();
+        node.port.postMessage({ type: 'dispose' });
+        node.port.onmessage = null;
+        node.onprocessorerror = null;
+        node.disconnect();
+        void audioContext.close();
+      },
+    };
+  } catch (error) {
+    // Reached by any throw above — a fetch failure in
+    // buildWorkletModuleUrl()/loadWasmBytes(), addModule() rejecting, `new
+    // AudioWorkletNode` throwing, or the re-thrown `ready` rejection above —
+    // and by nothing else, since a successful run returns from inside the
+    // try. This is the one place that closes `audioContext` on failure, so
+    // every failure path closes it exactly once instead of each new
+    // failure mode needing to remember to add its own.
+    void audioContext.close();
+    throw error;
+  }
 }
