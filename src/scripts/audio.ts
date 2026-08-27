@@ -377,7 +377,57 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
   // turns a real failure into a rejected promise here, which
   // handleAudioPlayClick()'s existing catch already surfaces in the status
   // line — no second error channel needed.
+  // Two guards below close a hang the message-based confirmation above
+  // still leaves open. The two *known* failures are covered only by
+  // accident of where they happen to occur: a worklet whose module fails
+  // to evaluate makes `new AudioWorkletNode(...)` throw synchronously
+  // (already surfaced, further up), and a `ModulePlayer` constructor
+  // failure is caught by the processor's own try/catch and turned into an
+  // `error` message (handled below). Neither guard defends a processor
+  // whose constructor throws *before* `this.port.onmessage` is assigned,
+  // or a message that is otherwise dropped — then nothing ever arrives,
+  // `ready` never settles, and the Play button would sit disabled forever
+  // with no status line: the same silent failure this file exists to
+  // replace, just relocated.
+  //
+  // `READY_TIMEOUT_MS` covers the gap: instantiating this wasm and
+  // constructing a `ModulePlayer` from it is single-digit-to-low-double-
+  // digit milliseconds in practice (measured end-to-end, including
+  // `AudioContext`/`addModule`/fetch on top of this step, at 16-44ms — see
+  // task-8-report.md), so 3 seconds is generous headroom between "a slow
+  // device doing honest work" and "nothing is ever coming."
+  // `onprocessorerror` is the direct signal for the case the timeout would
+  // otherwise catch only late and vaguely — it exists precisely for a
+  // processor that throws during construction or processing — so it's
+  // taken first when both could apply. Either guard rejects into the exact
+  // same path `error` already uses, so a visitor sees identical behaviour
+  // (the status line, the button staying "Play") whichever one fires.
+  const READY_TIMEOUT_MS = 3000;
+  let settled = false;
   const ready = new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          `The audio worklet never confirmed it started (no 'ready' or 'error' message within ${READY_TIMEOUT_MS}ms).`,
+        ),
+      );
+    }, READY_TIMEOUT_MS);
+
+    const settleResolve = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    const settleReject = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      reject(error);
+    };
+
     node.port.onmessage = (event: MessageEvent) => {
       const data = event.data as
         | { type: 'position'; order: number; pattern: number; row: number; tick: number }
@@ -395,7 +445,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
         // than the pre-init silence. Logged for the same reason the
         // heartbeat is: whoever is verifying playback with devtools open.
         console.debug('[play198x audio] worklet ready');
-        resolve();
+        settleResolve();
       } else if (data.type === 'heartbeat') {
         // A cheap, permanent health signal — see this file's header comment
         // and AudioHeartbeat's doc. Nothing in the UI reads this; it's here
@@ -403,8 +453,20 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
         console.debug('[play198x audio] heartbeat', data satisfies AudioHeartbeat);
       } else if (data.type === 'error') {
         console.error('[play198x audio] worklet failed to start the module:', data.message);
-        reject(new Error(data.message));
+        settleReject(new Error(data.message));
       }
+    };
+
+    // Fires for a processor that throws during construction or
+    // processing — including, notably, before it ever assigns
+    // `this.port.onmessage`, which is exactly the gap the timeout above
+    // would otherwise have to catch blind. The event carries no reliable
+    // detail across the worklet boundary in every engine, so the message
+    // says what's known (a processor error occurred) rather than
+    // fabricating specifics the event doesn't actually provide.
+    node.onprocessorerror = (event) => {
+      console.error('[play198x audio] worklet processor error', event);
+      settleReject(new Error('The audio worklet processor failed unexpectedly.'));
     };
   });
 
@@ -426,6 +488,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
     // AudioContext with a dead node sitting around; the caller gets a
     // rejected promise and never sees a handle for a player that can't play.
     node.port.onmessage = null;
+    node.onprocessorerror = null;
     node.disconnect();
     void audioContext.close();
     throw error;
@@ -462,6 +525,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
       positionListeners.clear();
       node.port.postMessage({ type: 'dispose' });
       node.port.onmessage = null;
+      node.onprocessorerror = null;
       node.disconnect();
       void audioContext.close();
     },
