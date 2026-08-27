@@ -4,6 +4,3 @@ node_modules/
 
 # Shared components, fetched at build time — never vendored.
 _198x-ui/
-
-# Copied from @play198x/web at build time — never vendored.
-public/wasm/

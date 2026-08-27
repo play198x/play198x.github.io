@@ -1,9 +1,8 @@
 ---
-// Placeholder page for Task 2: prove the pinned 198x-ui kit resolves and its
-// tokens apply. The player itself arrives in later tasks.
 import '@198x-ui/tokens.css';
 import Plate from '@198x-ui/components/Plate.astro';
 import SiteNav from '@198x-ui/components/SiteNav.astro';
+import DropTarget from '../components/DropTarget.astro';
 
 const items = [{ label: 'Play198x', href: '/', current: true }];
 ---
@@ -25,27 +24,7 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
       <Plate prefix="play" project="play" size={28} />
       <h1>Play198x</h1>
       <p>A retro media player is coming here — nothing you feed it ever leaves your browser.</p>
+      <DropTarget />
     </main>
-    <script type="module" is:inline>
-      // Proves the decoder actually runs in the browser, not just that it
-      // built. A ZX Spectrum SCREEN$ has no magic number — its length is the
-      // whole signal — so a bare 6912-byte buffer is enough to identify it,
-      // which is why the confidence comes back "probable" rather than
-      // "certain". No media touches this repo: the bytes are built in code.
-      import init, { probe } from '/wasm/play198x_web.js';
-
-      await init();
-
-      const bytes = new Uint8Array(6912);
-      const probed = probe(bytes);
-
-      console.log('play198x-web probe result:', probed?.format, probed?.confidence);
-      console.assert(probed?.format === 'scr', 'expected format "scr", got', probed?.format);
-      console.assert(
-        probed?.confidence === 'probable',
-        'expected confidence "probable", got',
-        probed?.confidence,
-      );
-    </script>
   </body>
 </html>

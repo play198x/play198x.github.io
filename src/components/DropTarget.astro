@@ -1,0 +1,118 @@
+---
+/**
+ * Where a visitor hands the player a file.
+ *
+ * The file picker (the visible <input type="file">) is not a fallback for
+ * dragging — it is the accessible path. A visitor who cannot drag a file
+ * (keyboard, touch, screen reader) still reaches the same onFile() as one
+ * who drops it; see src/scripts/player.ts. The a11y gate in Task 9 checks
+ * this path, but that is not why it exists.
+ *
+ * Draws nothing and decodes nothing — it names what the file is and where
+ * it will go. Task 5 draws the picture; Task 8 plays the module.
+ */
+---
+
+<div id="drop-target" class="drop-target">
+  <p class="drop-target-prompt">Drop a file here</p>
+  <div class="drop-target-picker">
+    <label class="drop-target-label" for="file-picker">Or choose a file from your device</label>
+    <input id="file-picker" class="drop-target-input" type="file" />
+  </div>
+  <p id="drop-target-status" class="drop-target-status" role="status" aria-live="polite"></p>
+</div>
+
+<script>
+  import { onFile } from '../scripts/player';
+
+  const target = document.getElementById('drop-target');
+  const picker = document.getElementById('file-picker');
+
+  if (target instanceof HTMLElement && picker instanceof HTMLInputElement) {
+    target.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      target.classList.add('is-active');
+    });
+
+    target.addEventListener('dragleave', () => {
+      target.classList.remove('is-active');
+    });
+
+    target.addEventListener('drop', (event) => {
+      event.preventDefault();
+      target.classList.remove('is-active');
+      const file = event.dataTransfer?.files?.[0];
+      if (file) {
+        void onFile(file);
+      }
+    });
+
+    picker.addEventListener('change', () => {
+      const file = picker.files?.[0];
+      if (file) {
+        void onFile(file);
+      }
+    });
+  }
+</script>
+
+<style>
+  .drop-target {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: clamp(1.5rem, 5vw, 3rem);
+    border: 2px dashed var(--h-line);
+    border-radius: 8px;
+    background: var(--h-ground);
+    text-align: center;
+    font-family: var(--h-font-ui);
+    color: var(--h-ink-body);
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .drop-target.is-active {
+    border-color: var(--h-accent);
+    border-style: solid;
+    background: var(--h-surface-light);
+  }
+
+  .drop-target-prompt {
+    margin: 0;
+  }
+
+  .drop-target-picker {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .drop-target-label {
+    color: var(--h-ink-muted);
+    font-size: 0.9em;
+  }
+
+  /* A visible, native <input type="file"> rather than a hidden input behind
+   * a styled trigger — it is keyboard- and screen-reader-operable by
+   * default, and this task's whole point is that the picker is a first-class
+   * path, not a fallback dressed up to look secondary. */
+  .drop-target-input {
+    font-family: inherit;
+    font-size: 0.9em;
+  }
+
+  .drop-target-input:focus-visible {
+    outline: 2px solid var(--h-accent);
+    outline-offset: 3px;
+  }
+
+  .drop-target-status {
+    margin: 0;
+    min-height: 1.2em;
+    color: var(--h-ink-body);
+    font-family: var(--h-font-mono);
+    font-size: 0.9em;
+  }
+</style>

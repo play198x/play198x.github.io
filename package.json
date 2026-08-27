@@ -5,10 +5,9 @@
   "version": "0.0.1",
   "scripts": {
     "ui:fetch": "./scripts/fetch-ui.sh",
-    "build:wasm": "node scripts/build-wasm.mjs",
     "predev": "npm run ui:fetch",
     "dev": "astro dev",
-    "prebuild": "npm run ui:fetch && npm run build:wasm",
+    "prebuild": "npm run ui:fetch",
     "build": "astro build",
     "preview": "astro preview",
     "test": "node --test 'tests/**/*.test.mjs'"
