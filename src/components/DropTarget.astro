@@ -64,6 +64,16 @@
 </script>
 
 <style>
+  /* `hidden` must actually hide — see Player.astro's matching comment on
+   * this exact collision. `.archive-entries` below sets `display: flex`,
+   * which (being a normal author rule) would otherwise beat the browser's
+   * own `[hidden] { display: none }` (user-agent origin) regardless of
+   * specificity, leaving an empty list rendered before any archive is
+   * opened. */
+  [hidden] {
+    display: none !important;
+  }
+
   .drop-target {
     display: flex;
     flex-direction: column;
