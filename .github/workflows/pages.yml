@@ -1,0 +1,70 @@
+name: Pages
+
+on:
+  # Without this, no pull request ever ran these checks: the tests and the
+  # build only fired once a merge had already landed on main. A pull request
+  # reported "no checks", which reads like nothing needed checking rather than
+  # nothing was checked — the shape this repository's own "a gate nobody runs
+  # is a silent gate" decision exists to reject.
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Only deploy writes Pages, so only deploy is granted it. Pull requests now
+# run this workflow, and a run triggered by a pull request has no business
+# holding a token that can publish the site.
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Astro site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out site
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build site
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    # A pull request gets every check above and stops there. Deploying one
+    # would publish an unmerged branch to the live site.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
