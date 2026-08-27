@@ -48,31 +48,33 @@
     target.addEventListener('drop', (event) => {
       event.preventDefault();
       target.classList.remove('is-active');
-      const file = event.dataTransfer?.files?.[0];
+      const files = event.dataTransfer?.files;
+      const file = files?.[0];
       if (file) {
-        void onFile(file);
+        // Only the first of several dropped files is ever opened — see
+        // onFile()'s own doc. Passing the real count is what lets it say so
+        // instead of silently discarding the rest with no acknowledgment.
+        void onFile(file, files.length);
       }
     });
 
     picker.addEventListener('change', () => {
+      // The picker has no `multiple` attribute, so this is always exactly
+      // one file — passed through anyway so both callers go through the
+      // same signature.
       const file = picker.files?.[0];
       if (file) {
-        void onFile(file);
+        void onFile(file, picker.files?.length ?? 1);
       }
     });
   }
 </script>
 
 <style>
-  /* `hidden` must actually hide — see Player.astro's matching comment on
-   * this exact collision. `.archive-entries` below sets `display: flex`,
-   * which (being a normal author rule) would otherwise beat the browser's
-   * own `[hidden] { display: none }` (user-agent origin) regardless of
-   * specificity, leaving an empty list rendered before any archive is
-   * opened. */
-  [hidden] {
-    display: none !important;
-  }
+  /* `[hidden] { display: none !important }` lives once, globally, in
+   * src/pages/index.astro — see that file's comment. `.archive-entries`
+   * below sets `display: flex`, which would otherwise beat `hidden`,
+   * leaving an empty list rendered before any archive is opened. */
 
   .drop-target {
     display: flex;

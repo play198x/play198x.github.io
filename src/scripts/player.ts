@@ -171,7 +171,17 @@ export function sizeError(byteLength: number): string | undefined {
   if (byteLength <= MAX_CONTAINER_BYTES) {
     return undefined;
   }
-  return `That file is ${describeSize(byteLength)} — this player only opens files up to ${describeSize(MAX_CONTAINER_BYTES)}.`;
+  const limit = describeSize(MAX_CONTAINER_BYTES);
+  const rounded = describeSize(byteLength);
+  // describeSize() rounds anything ≥10 units to a whole number, so a file
+  // only a few bytes over the limit renders identically to the limit itself
+  // — "That file is 64 MiB — this player only opens files up to 64 MiB"
+  // reads as a contradiction (same size, refused anyway). Fall back to an
+  // exact byte count whenever rounding would produce that collision; a file
+  // comfortably clear of the limit (the 2 GiB case, say) still gets the
+  // friendly rounded form.
+  const size = rounded === limit ? `${byteLength.toLocaleString()} bytes` : rounded;
+  return `That file is ${size} — this player only opens files up to ${limit}.`;
 }
 
 let wasmReady: Promise<void> | undefined;
@@ -445,10 +455,19 @@ function showMetadata(
 /**
  * Decode `bytes` as `format` and show the result: draw it to the canvas,
  * fill in the metadata panel, and reveal Player.astro's panel. On a decode
- * failure (most likely after a manual override to the wrong format) the
- * canvas and metadata are left as they were and the failure is reported
- * through the same status line `onFile` uses — the override control stays
- * visible so the visitor can try something else.
+ * failure, the canvas and metadata are left as they were and the failure is
+ * reported through the same status line `onFile` uses.
+ *
+ * "Left as they were" means something different depending on who called
+ * this. wireFormatOverride()'s manual-override path (`identification ===
+ * 'manual'`) re-decodes bytes that already drew successfully once, with the
+ * panel and its override control already visible — those stay visible and
+ * showing the previous good picture, so the visitor can pick another format
+ * without losing their place. openEntry()'s initial decode runs while the
+ * panel is still hidden (hideAllPanels() already ran for this drop): if
+ * *that* one fails, there is no override control on screen yet to correct
+ * with, so the panel simply stays hidden rather than showing an empty
+ * canvas with nothing to fix it.
  *
  * `sourceLabel` is what's shown as the picture's source and passed to
  * `image.metadata()` — the outer file's name for a plain drop, or the
@@ -612,11 +631,25 @@ async function handleAudioPlayClick(): Promise<void> {
       return;
     }
     currentAudio = handle;
+    // audio.ts's worklet already rate-limits and dedupes what it posts (see
+    // its own process() comment), but this listener still fires once per
+    // post — this second check is what stops the DOM write itself, the
+    // other half of the same live-region flood: a screen reader announces
+    // every write to a `role="status"` region, not just ones that change
+    // what's displayed, so a write with unchanged text is still a wasted
+    // announcement.
+    let lastPositionText: string | undefined;
     handle.onPosition((position: ModulePosition) => {
       const { position: positionEl } = audioElements();
-      if (positionEl) {
-        positionEl.textContent = `Order ${position.order}, pattern ${position.pattern}, row ${position.row}`;
+      if (!positionEl) {
+        return;
       }
+      const text = `Order ${position.order}, pattern ${position.pattern}, row ${position.row}`;
+      if (text === lastPositionText) {
+        return;
+      }
+      lastPositionText = text;
+      positionEl.textContent = text;
     });
     setPlayButtonLabel('Pause');
   } catch (error) {
@@ -832,14 +865,35 @@ function openContainer(container: Container, file: File): void {
  * as a `Container`: see openContainer() for what happens next. `file.size`
  * is checked before `arrayBuffer()` is ever called, so an oversized file is
  * refused before its bytes are read into memory at all — see
- * MAX_CONTAINER_BYTES's comment for why that ordering matters.
+ * MAX_CONTAINER_BYTES's comment for why that ordering matters. An oversized
+ * file also hides whatever panel was already showing, the same as every
+ * other refusal path here — otherwise a good file's picture or module stays
+ * on screen under a message about a completely different, rejected file.
+ *
+ * `droppedCount` is how many files the visitor actually dropped or picked —
+ * always 1 from the file picker (it has no `multiple` attribute), sometimes
+ * more from a drag-and-drop with several files selected. Only `file` (the
+ * first) is ever opened; when there were others, the status line says so
+ * rather than silently acting on one of several files with no acknowledgment
+ * the rest were ignored.
  */
-export async function onFile(file: File): Promise<void> {
+export async function onFile(file: File, droppedCount = 1): Promise<void> {
   const sizeProblem = sizeError(file.size);
   if (sizeProblem) {
     report(sizeProblem);
+    hideAllPanels();
+    hideArchiveList();
     return;
   }
+
+  // Reported before either await below: loadWasm() fetches this player's
+  // ~224 KiB decoder lazily, on the FIRST file any visitor ever drops (see
+  // loadWasm()'s own comment), and file.arrayBuffer() itself takes a moment
+  // for a large file. Measured with a 4s wasm response: without this, the
+  // status line stayed completely empty for the whole wait, reading as
+  // though the page had ignored the drop.
+  const multiNote = droppedCount > 1 ? ` (${droppedCount} files dropped — only ${file.name} opens)` : '';
+  report(`Reading ${file.name}${multiNote}…`);
 
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
