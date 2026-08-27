@@ -17,7 +17,35 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Play198x: a retro media player that runs entirely in your browser." />
     <title>Play198x</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="16x16 32x32" />
+    <link rel="canonical" href="https://play198x.github.io/" />
     <link rel="sitemap" href="/sitemap-index.xml" />
+
+    <!-- Open Graph / Twitter card: a bare title-and-description unfurl is
+         what a soft launch shared into Slack/Mastodon/Discord actually gets
+         without these — no image, no site name, a generic globe in every
+         tab. No og:image: the family's rights position is that no
+         third-party media (the pictures and music a visitor drops here) is
+         ever committed to a repo, and the only art that could stand in for
+         one — the 198x-ui kit's wordmarks — lives in _198x-ui/, which is
+         git-ignored and fetched at build time, so nothing from it can be
+         committed here either. A correct text-only unfurl beats an invented
+         image. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://play198x.github.io/" />
+    <meta property="og:title" content="Play198x" />
+    <meta
+      property="og:description"
+      content="Play198x: a retro media player that runs entirely in your browser."
+    />
+    <meta property="og:site_name" content="Play198x" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Play198x" />
+    <meta
+      name="twitter:description"
+      content="Play198x: a retro media player that runs entirely in your browser."
+    />
   </head>
   <body>
     <SiteNav prefix="play" project="play" items={items} />
@@ -70,10 +98,10 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
         <h2 id="downloads-heading">Downloads</h2>
         <p>There is no desktop application to download yet.</p>
         <p>
-          The code behind this page is published for developers to build on:
-          <a href="https://crates.io/crates/play198x-core">play198x-core</a> on crates.io is the Rust
-          engine that decodes and plays this material, and
-          <a href="https://www.npmjs.com/package/@play198x/web">@play198x/web</a> on npm is the
+          The code behind this page is published for developers to build on: <a
+            href="https://crates.io/crates/play198x-core">play198x-core</a> on crates.io is the Rust
+          engine that decodes and plays this material, and <a
+            href="https://www.npmjs.com/package/@play198x/web">@play198x/web</a> on npm is the
           WebAssembly build running this page. Neither ships a standalone application.
         </p>
       </section>

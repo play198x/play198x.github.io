@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Play198x">
+  <!--
+    Hand-authored, not exported from the 198x-ui kit: `_198x-ui/` (the shared
+    wordmark source) is git-ignored and fetched at build time, so nothing
+    from it can be committed into this repo — see
+    198x/decisions/publishing-third-party-imagery.md and this repo's own
+    launch-blockers report. This tile instead applies the family's own
+    committed visual-identity decision directly: the plate's constant house-
+    brown frame, and Play198x's project colour, both taken from
+    198x/decisions/family-visual-identity.md (fill #5b6c00, frame #3a2c1f,
+    cream ink #faf8f2) — nothing here is copied from a fetched artefact.
+
+    At favicon sizes the family's own spec calls for the plate's compact
+    form: "the stacked cell ... drops to the wildcard x alone at 16px." This
+    is that reduction — the wildcard `x` alone, on the Play198x fill, framed
+    the way every plate is framed.
+  -->
+  <rect x="1" y="1" width="30" height="30" rx="6" fill="#5b6c00" stroke="#3a2c1f" stroke-width="2" />
+  <text
+    x="16"
+    y="23"
+    text-anchor="middle"
+    font-family="JetBrains Mono, ui-monospace, Menlo, Consolas, monospace"
+    font-weight="700"
+    font-size="20"
+    fill="#faf8f2"
+  >x</text>
+</svg>
