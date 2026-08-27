@@ -22,11 +22,120 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
   <body>
     <SiteNav prefix="play" project="play" items={items} />
     <main>
-      <Plate prefix="play" project="play" size={28} />
+      <!-- href="/" so this renders as a link (role="link"), not a bare
+           <span>: a plain <span> has no ARIA role that supports a name, so
+           the aria-label Plate.astro sets on an unlinked plate is silently
+           dropped by assistive tech (axe: aria-prohibited-attr). Same fix
+           SiteNav.astro already applies to its own Plate via `homeHref`. -->
+      <Plate prefix="play" project="play" size={28} href="/" />
       <h1>Play198x</h1>
       <p>A retro media player is coming here — nothing you feed it ever leaves your browser.</p>
       <DropTarget />
       <Player />
+
+      <section class="below-fold" aria-labelledby="what-it-is-heading">
+        <h2 id="what-it-is-heading">What Play198x is</h2>
+        <p>Play198x renders media. It does not boot a machine, run a program, or emulate a CPU.</p>
+        <p>
+          A ZX Spectrum SCREEN$, a Commodore 64 bitmap, or a ProTracker module plays here the way a
+          photo or an MP3 plays anywhere else: read, decoded, and shown or heard. Nothing runs
+          underneath it.
+        </p>
+        <p>
+          Every file you drop stays in your browser. Play198x decodes it there and never uploads,
+          stores, or transmits it.
+        </p>
+      </section>
+
+      <section class="below-fold" aria-labelledby="what-it-plays-heading">
+        <h2 id="what-it-plays-heading">What it plays today</h2>
+        <p>
+          Play198x reads five formats: ZX Spectrum SCREEN$, Commodore 64 Koala Paint, Commodore 64
+          Art Studio, Amiga IFF ILBM, and ProTracker MOD.
+        </p>
+        <p>
+          It does not yet play SID or AY chiptunes. Both need chip emulation that lives in Emu198x,
+          and Emu198x's chip crates are not published yet
+          (<a href="https://github.com/emu198x/emu198x/issues/1214">emu198x/emu198x#1214</a>).
+        </p>
+        <p>
+          It opens plain files, ZIP archives, and Amiga ADF disk images, and decompresses
+          PowerPacker-compressed entries on the way in. Drop an unmodified TOSEC ZIP or a real Amiga
+          music disk and it opens.
+        </p>
+      </section>
+
+      <section class="below-fold" aria-labelledby="downloads-heading">
+        <h2 id="downloads-heading">Downloads</h2>
+        <p>There is no desktop application to download yet.</p>
+        <p>
+          The code behind this page is published for developers to build on:{' '}
+          <a href="https://crates.io/crates/play198x-core">play198x-core</a> on crates.io is the Rust
+          engine that decodes and plays this material, and{' '}
+          <a href="https://www.npmjs.com/package/@play198x/web">@play198x/web</a> on npm is the
+          WebAssembly build running this page. Both are libraries to build on, not applications to
+          run.
+        </p>
+      </section>
     </main>
+
+    <footer class="site-footer">
+      <!-- Standing rights notice: this page renders third-party works — the
+           pictures and music a visitor drops on it — even though it never
+           serves or stores any of it. See
+           198x/decisions/publishing-third-party-imagery.md and the rights
+           position in docs/specs/2026-08-26-website-design.md. -->
+      <p>
+        This page decodes and plays whatever you drop on it — pictures and music made by other
+        people. Play198x does not store, host, or redistribute any of it. Nothing you provide here
+        leaves your browser.
+      </p>
+    </footer>
+
+    <style>
+      /* The page had no ground/ink rule of its own before this task — the
+       * hero content above (h1/p) happens to read fine in black-on-white
+       * regardless of theme, so the gap was invisible. The sections below
+       * use the theme-aware ink tokens the rest of the kit uses (so they
+       * read correctly in dark mode too), and those tokens assume the page
+       * itself is painted in --h-page/--h-ground: without this rule, dark
+       * mode's light ink tokens (meant for a dark ground) sat on the
+       * browser's default white background, which is how the a11y sweep
+       * caught this — four `serious` contrast failures, dark theme only. */
+      body {
+        background: var(--h-page);
+        color: var(--h-ink-body);
+      }
+
+      .below-fold {
+        max-width: 68ch;
+        margin: 3rem auto 0;
+        font-family: var(--h-font-read);
+        color: var(--h-ink-body);
+      }
+
+      .below-fold h2 {
+        font-family: var(--h-font-ui);
+        color: var(--h-ink);
+      }
+
+      .below-fold p {
+        line-height: 1.5;
+      }
+
+      .below-fold a {
+        color: var(--h-accent-ink);
+      }
+
+      .site-footer {
+        max-width: 68ch;
+        margin: 3rem auto 0;
+        padding: 1rem clamp(1rem, 4vw, 2.25rem) calc(2rem + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--h-line);
+        font-family: var(--h-font-ui);
+        font-size: 0.82rem;
+        color: var(--h-ink-muted);
+      }
+    </style>
   </body>
 </html>

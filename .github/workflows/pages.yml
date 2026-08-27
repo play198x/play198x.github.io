@@ -39,11 +39,45 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The prose gate (npm run build, below) shells out to vale, which is
+      # not on the runner. It fails loudly when the binary is missing rather
+      # than skipping — that is the point of it — so the build cannot pass
+      # without this step, and cannot quietly pass over unchecked prose
+      # either.
+      - name: Install the house prose style
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz" \
+            | tar -xz -C /usr/local/bin vale
+          vale --version
+          vale sync
+        env:
+          VALE_VERSION: 3.17.1
+
       - name: Run tests
         run: npm test
 
+      # Route, internal-link and prose gates run inside this script — see
+      # package.json's "build". A broken route, a dead link, or a house-style
+      # alert fails the build, not a follow-on step someone could forget to
+      # wire in.
       - name: Build site
         run: npm run build
+
+      # Between building and publishing, because a page that fails WCAG AA
+      # or ships with the wasm player silently broken is not one to deploy.
+      - name: Install the browser the site test and the a11y sweep drive
+        run: npx playwright install --with-deps chromium
+
+      # The one test a build-time check cannot do: drop a synthetic module on
+      # the real, built page in a real browser and confirm the wasm player
+      # actually plays it. Every node test in this repo runs @play198x/web
+      # under Node, which cannot catch the wasm 404ing under browser fetch.
+      - name: Run the browser player test
+        run: npm run test:e2e
+
+      - name: Check accessibility
+        run: npm run a11y
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

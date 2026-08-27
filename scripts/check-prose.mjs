@@ -1,0 +1,76 @@
+/**
+ * Runs the house prose style over the built site. Ported from
+ * emu198x.github.io.
+ *
+ * Bare `vale` cannot be the gate. Vale does not recognise the .astro
+ * extension, so `vale src/pages/index.astro` prints "0 errors ... in 0
+ * files" and exits 0 — a pass earned by reading nothing. This page is
+ * .astro, so a prose gate run that way would be green over prose it had
+ * never seen.
+ *
+ * So this checks the built HTML, which is what a reader is actually served,
+ * and it fails when the file count is zero. A gate that cannot report having
+ * done nothing is the only kind worth running.
+ */
+import { execFileSync } from 'node:child_process';
+import { readdirSync, existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+const dist = resolve(process.cwd(), 'dist');
+
+function pages(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return pages(path);
+    return entry.name.endsWith('.html') ? [path] : [];
+  });
+}
+
+if (!existsSync(dist)) {
+  console.error('prose: no dist/ — run `npm run build` first.');
+  process.exit(1);
+}
+
+const files = pages(dist);
+
+if (files.length === 0) {
+  console.error('prose: dist/ holds no HTML. Refusing to report a pass over nothing.');
+  process.exit(1);
+}
+
+// Vale's exit code tracks errors, not suggestions, so trusting it would let
+// every suggestion through while printing a pass — the same hollow green this
+// script exists to stop. Count the alerts instead.
+let report = '{}';
+try {
+  report = execFileSync('vale', ['--output=JSON', ...files], { encoding: 'utf8' });
+} catch (err) {
+  report = err.stdout || '';
+  if (!report.trim()) {
+    console.error(`prose: vale failed to run: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+let parsed;
+try {
+  parsed = JSON.parse(report);
+} catch {
+  console.error('prose: vale did not return JSON. Refusing to guess whether the copy passed.');
+  process.exit(1);
+}
+
+const alerts = Object.entries(parsed).flatMap(([file, list]) =>
+  (list ?? []).map((alert) => ({ file, ...alert })),
+);
+
+if (alerts.length > 0) {
+  for (const alert of alerts) {
+    const where = `${alert.file.replace(`${process.cwd()}/`, '')}:${alert.Line}`;
+    console.error(`${where}  ${alert.Severity}  ${alert.Message}  [${alert.Check}]`);
+  }
+  console.error(`\nprose: ${alerts.length} house-style alert(s) across ${files.length} built pages.`);
+  process.exit(1);
+}
+
+console.log(`prose: ${files.length} built pages checked, no house-style alerts.`);
