@@ -10,20 +10,32 @@
 set -euo pipefail
 
 REPO="https://github.com/stevehill1981/198x-ui.git"
-REF="${UI_REF:-v0.3.1}"
+REF="${UI_REF:-v0.5.0}"
 DIR="_198x-ui"
 
 if [ -d "$DIR/.git" ]; then
   current=$(git -C "$DIR" describe --tags --exact-match 2>/dev/null || echo "")
-  if [ "$current" = "$REF" ]; then
+  if [ "$current" != "$REF" ]; then
+    git -C "$DIR" fetch --quiet --tags origin
+    git -C "$DIR" checkout --quiet "$REF"
+    echo "198x-ui: moved to $REF"
+  else
     echo "198x-ui: already at $REF"
-    exit 0
   fi
-  git -C "$DIR" fetch --quiet --tags origin
-  git -C "$DIR" checkout --quiet "$REF"
-  echo "198x-ui: moved to $REF"
 else
   rm -rf "$DIR"
   git clone --quiet --depth 1 --branch "$REF" "$REPO" "$DIR"
   echo "198x-ui: cloned at $REF"
 fi
+
+# fonts.css asks for /fonts/, so the kit's font files have to be served from the
+# site root. They belong to the kit rather than to this site, so public/fonts is
+# gitignored and recopied on every run instead of being committed here.
+#
+# This runs unconditionally, including when the checkout was already at $REF.
+# Copying it only on a version change would leave a cleaned public/ with no
+# fonts and no error -- the page would silently fall back to system faces.
+mkdir -p public
+rm -rf public/fonts
+cp -R "$DIR/fonts" public/fonts
+echo "198x-ui: fonts copied to public/fonts"
