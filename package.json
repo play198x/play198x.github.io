@@ -5,15 +5,17 @@
   "version": "0.0.1",
   "scripts": {
     "ui:fetch": "./scripts/fetch-ui.sh",
+    "build:wasm": "node scripts/build-wasm.mjs",
     "predev": "npm run ui:fetch",
     "dev": "astro dev",
-    "prebuild": "npm run ui:fetch",
+    "prebuild": "npm run ui:fetch && npm run build:wasm",
     "build": "astro build",
     "preview": "astro preview",
     "test": "node --test 'tests/**/*.test.mjs'"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
+    "@play198x/web": "^0.1.0",
     "astro": "^7.0.3"
   }
 }
