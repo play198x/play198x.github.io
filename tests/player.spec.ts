@@ -114,10 +114,10 @@ test('a dropped synthetic ProTracker module plays in the real, built page', asyn
       assert.match(format ?? '', /ProTracker/, `expected a ProTracker identification, got "${format}"`);
 
       // The module is 1084 bytes, which describeSize() in player.ts renders
-      // in KiB, not bytes — the length the player reports must reflect the
-      // dropped file's real size, not a placeholder.
+      // as "1.1 KiB" (1084 / 1024, toFixed(1)) — the length the player
+      // reports must reflect the dropped file's real size, not a placeholder.
       const length = await audioPanel.locator('#audio-length').textContent();
-      assert.match(length ?? '', /KiB|B$/, `expected a size string, got "${length}"`);
+      assert.equal(length, '1.1 KiB', `expected the real file size, got "${length}"`);
 
       // The transport: a visitor must see a way to start playback.
       const playButton = audioPanel.locator('#audio-play-button');

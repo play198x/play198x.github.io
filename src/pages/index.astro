@@ -29,7 +29,7 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
            SiteNav.astro already applies to its own Plate via `homeHref`. -->
       <Plate prefix="play" project="play" size={28} href="/" />
       <h1>Play198x</h1>
-      <p>A retro media player is coming here — nothing you feed it ever leaves your browser.</p>
+      <p>Play198x plays retro media in your browser. Drop a file below to play it — nothing you feed it ever leaves your browser.</p>
       <DropTarget />
       <Player />
 
@@ -37,9 +37,8 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
         <h2 id="what-it-is-heading">What Play198x is</h2>
         <p>Play198x renders media. It does not boot a machine, run a program, or emulate a CPU.</p>
         <p>
-          A ZX Spectrum SCREEN$, a Commodore 64 bitmap, or a ProTracker module plays here the way a
-          photo or an MP3 plays anywhere else: read, decoded, and shown or heard. Nothing runs
-          underneath it.
+          A ZX Spectrum SCREEN$ or a Commodore 64 bitmap opens the way a photo does; a ProTracker
+          module plays the way an MP3 does: read, decoded, and shown or heard.
         </p>
         <p>
           Every file you drop stays in your browser. Play198x decodes it there and never uploads,
@@ -59,9 +58,11 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
           (<a href="https://github.com/emu198x/emu198x/issues/1214">emu198x/emu198x#1214</a>).
         </p>
         <p>
-          It opens plain files, ZIP archives, and Amiga ADF disk images, and decompresses
-          PowerPacker-compressed entries on the way in. Drop an unmodified TOSEC ZIP or a real Amiga
-          music disk and it opens.
+          It opens plain files, ZIP archives, and Amiga ADF disk images (the standard density; not
+          the high-density format), and decompresses PowerPacker-compressed entries on the way in.
+          A ZIP of supported files opens, and an ADF opens. A ZIP of ADFs — the shape most TOSEC
+          Amiga sets use — does not: this player does not open a disk image nested inside an
+          archive.
         </p>
       </section>
 
@@ -69,12 +70,11 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
         <h2 id="downloads-heading">Downloads</h2>
         <p>There is no desktop application to download yet.</p>
         <p>
-          The code behind this page is published for developers to build on:{' '}
+          The code behind this page is published for developers to build on:
           <a href="https://crates.io/crates/play198x-core">play198x-core</a> on crates.io is the Rust
-          engine that decodes and plays this material, and{' '}
+          engine that decodes and plays this material, and
           <a href="https://www.npmjs.com/package/@play198x/web">@play198x/web</a> on npm is the
-          WebAssembly build running this page. Both are libraries to build on, not applications to
-          run.
+          WebAssembly build running this page. Neither ships a standalone application.
         </p>
       </section>
     </main>

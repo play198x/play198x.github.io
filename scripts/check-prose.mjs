@@ -60,6 +60,25 @@ try {
   process.exit(1);
 }
 
+// A working `--output=JSON` run reports {"<path>": [<alert>, ...], ...} — an
+// object whose values are arrays. A broken vale config (e.g. a StylesPath
+// that needs `vale sync`) instead emits a single flat alert object, such as
+// {"Line":0,"Path":...,"Code":"E201"}, and exits 2. That still parses as
+// JSON, so the catch above never fires, and Object.entries(...).flatMap on a
+// number's non-array values would throw a TypeError that hides the real
+// config problem behind a stack trace. Check the shape before flattening so
+// a config failure is reported as what it is.
+if (
+  parsed === null ||
+  typeof parsed !== 'object' ||
+  Array.isArray(parsed) ||
+  !Object.values(parsed).every((value) => Array.isArray(value))
+) {
+  console.error('prose: vale returned JSON, but not a { file: [alerts] } report.');
+  console.error(`prose: this usually means vale itself failed (styles not synced?): ${report.trim()}`);
+  process.exit(1);
+}
+
 const alerts = Object.entries(parsed).flatMap(([file, list]) =>
   (list ?? []).map((alert) => ({ file, ...alert })),
 );
