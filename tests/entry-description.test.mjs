@@ -72,3 +72,16 @@ test('sizeError names a large refused file in human units', () => {
   assert.ok(message);
   assert.match(message, /2 GiB/);
 });
+
+test('sizeError does not say a refused file matches the limit it exceeds', () => {
+  // describeSize() rounds anything ≥10 units to a whole number, so a file
+  // one byte over the 64 MiB limit rounds to the same "64 MiB" as the limit
+  // itself — "That file is 64 MiB — this player only opens files up to 64
+  // MiB" reads as a contradiction. sizeError() falls back to an exact byte
+  // count whenever that collision would happen.
+  const message = sizeError(MAX_CONTAINER_BYTES + 1);
+
+  assert.ok(message);
+  assert.match(message, /67,108,865 bytes/);
+  assert.doesNotMatch(message, /That file is 64 MiB/);
+});

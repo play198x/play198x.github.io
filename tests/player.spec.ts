@@ -18,65 +18,54 @@
 // Run against the built site (`npm run build` first), never src/ directly —
 // the drop target's wasm loading is a property of the built asset graph.
 //
-// Serves dist/ with a plain Node http server rather than shelling out to
+// Serves dist/ via scripts/serve-dist.mjs rather than shelling out to
 // `astro preview`: a first version spawned that CLI as a child process, and
 // on every run it left an orphaned server bound to the port after the test
 // finished — `astro preview` starts its own internal sub-process for the
 // actual server, which does not share `spawn()`'s process group, so no
-// signal sent to the CLI process killed it. This server (the same minimal
-// one scripts/a11y-sweep.mjs already uses to serve dist/ for a real
-// browser) is started and stopped in-process, so there is nothing left to
-// leak.
+// signal sent to the CLI process killed it. That shared module is the same
+// server scripts/a11y-sweep.mjs uses — this file used to carry its own,
+// independently drifted copy; see serve-dist.mjs's own header comment.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
-import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { serveDist } from '../scripts/serve-dist.mjs';
 
 const SITE_ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const DIST = join(SITE_ROOT, 'dist');
-
-const TYPES: Record<string, string> = {
-  '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
-  '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
-  '.xml': 'application/xml', '.wasm': 'application/wasm',
-};
 
 test('a dropped synthetic ProTracker module plays in the real, built page', async () => {
   if (!existsSync(DIST)) {
     throw new Error('player.spec: no dist/ — run `npm run build` first.');
   }
 
-  const server = createServer((req, res) => {
-    const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
-    let file = join(DIST, requestPath);
-    try {
-      if (statSync(file).isDirectory()) file = join(file, 'index.html');
-    } catch {
-      // Not a directory (or doesn't exist) — fall through to the read below,
-      // which reports a 404 the same way either case would.
-    }
-    try {
-      const body = readFileSync(file);
-      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-      res.end(body);
-    } catch {
-      res.writeHead(404);
-      res.end('not found');
-    }
-  });
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
-  const baseUrl = `http://localhost:${port}`;
+  const { server, baseUrl } = await serveDist(DIST);
 
   try {
-    const browser = await chromium.launch();
+    // Without this flag, a click dispatched by Playwright in headless
+    // Chromium does not reliably count as the "user gesture" the Web Audio
+    // spec requires before an AudioContext can produce sound — the click
+    // lands, but audio.ts's playModule() never gets past constructing the
+    // context. This is a test-environment concession, not something the
+    // real page relies on: an actual visitor's click is a real gesture.
+    const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
     try {
       const page = await browser.newPage();
+      // Named `consoleErrors` and not just `pageErrors`: `pageerror` alone
+      // only catches an uncaught exception. audio.ts's own worklet-failure
+      // path (see its 'error'/onprocessorerror handlers) reports through
+      // `console.error`, not a thrown error — a broken worklet would leave
+      // this array empty, and the assertion at the end of this test would
+      // pass, if `console` messages weren't also collected here.
       const consoleErrors: string[] = [];
       page.on('pageerror', (error) => consoleErrors.push(String(error)));
+      page.on('console', (message) => {
+        if (message.type() === 'error') {
+          consoleErrors.push(message.text());
+        }
+      });
 
       await page.goto(baseUrl, { waitUntil: 'load' });
       await page.waitForSelector('#drop-target');
@@ -124,7 +113,37 @@ test('a dropped synthetic ProTracker module plays in the real, built page', asyn
       await assert.doesNotReject(playButton.waitFor({ state: 'visible' }));
       assert.equal(await playButton.isEnabled(), true);
 
-      assert.deepEqual(consoleErrors, [], `page threw: ${consoleErrors.join('; ')}`);
+      // The point of this test: press Play and confirm the wasm player
+      // actually plays the module, not just that a button for it exists.
+      // This is what used to be missing — the test stopped at "the button
+      // is visible and enabled" and never clicked it, so nothing in CI ever
+      // exercised playModule(), the glue fetch, the worklet's
+      // TextDecoder/TextEncoder polyfill, initSync inside the worklet,
+      // ModulePlayer construction, or the 'ready' handshake — the least
+      // standard, most fragile code in this repo.
+      const positionEl = audioPanel.locator('#audio-position');
+      const positionBeforePlay = (await positionEl.textContent()) ?? '';
+
+      await playButton.click();
+
+      // Fails with Playwright's own timeout error (naming the locator and
+      // the wait) if the label never flips — no separate assertion needed.
+      await playButton.filter({ hasText: 'Pause' }).waitFor({ timeout: 10_000 });
+
+      const statusText = (await audioPanel.locator('#audio-status').textContent())?.trim() ?? '';
+      assert.equal(statusText, '', `expected no playback error, got "${statusText}"`);
+
+      // The worklet posts a position update only once it has actually
+      // rendered past the start — waiting for the text to change (rather
+      // than just checking it's non-empty) is what proves playback is
+      // actually advancing, not just that the panel initialised its text.
+      await page.waitForFunction(
+        (before) => document.getElementById('audio-position')?.textContent !== before,
+        positionBeforePlay,
+        { timeout: 10_000 },
+      );
+
+      assert.deepEqual(consoleErrors, [], `page logged an error: ${consoleErrors.join('; ')}`);
     } finally {
       await browser.close();
     }

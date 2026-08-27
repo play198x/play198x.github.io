@@ -120,6 +120,29 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
       </p>
     </footer>
 
+    <style is:global>
+      /* `hidden` must actually hide, for EVERY component on the page, not
+       * just the ones that happened to remember this. The browser's own
+       * `[hidden] { display: none }` rule lives in the user-agent
+       * stylesheet, and ANY normal-weight author rule beats ANY user-agent
+       * rule regardless of selector specificity — the origin is compared
+       * before specificity is. DropTarget.astro and Player.astro both set
+       * `display: flex`/`display: grid` on elements they also toggle
+       * `hidden` on, so without an author-level override, setting
+       * `.hidden = true` left them visibly on screen (confirmed live on the
+       * public site: an empty black canvas showing before any file was ever
+       * dropped). This used to be copied into each Astro-scoped component
+       * style block that needed it — two separate tasks independently
+       * rediscovered the same collision — which meant a third component
+       * would hit it again; it belongs once, unscoped, here, so every
+       * component gets it for free. `!important` is what browsers' own
+       * resets use for this exact collision — nothing short of it survives
+       * a future rule that sets `display` on a hidden element again. */
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+
     <style>
       /* The page had no ground/ink rule of its own before this task — the
        * hero content above (h1/p) happens to read fine in black-on-white

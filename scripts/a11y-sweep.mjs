@@ -19,10 +19,10 @@
  * against, and what you have to go and change.
  */
 import { chromium } from 'playwright';
-import { createServer } from 'node:http';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, relative, sep, extname, dirname } from 'node:path';
+import { join, relative, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { serveDist } from './serve-dist.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.argv[2] ?? join(HERE, '..', 'dist');
@@ -39,15 +39,6 @@ const AXE = readFileSync(
   'utf8',
 );
 
-const TYPES = {
-  '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
-  '.mjs': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp', '.gif': 'image/gif', '.woff2': 'font/woff2',
-  '.woff': 'font/woff', '.ico': 'image/x-icon', '.xml': 'application/xml',
-  '.txt': 'text/plain', '.wasm': 'application/wasm',
-};
-
 function routes(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
@@ -60,21 +51,7 @@ function routes(dir, out = []) {
   return out;
 }
 
-const server = createServer((req, res) => {
-  const path = decodeURIComponent(req.url.split('?')[0]);
-  let file = join(DIST, path);
-  try { if (statSync(file).isDirectory()) file = join(file, 'index.html'); } catch {}
-  try {
-    const body = readFileSync(file);
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-    res.end(body);
-  } catch {
-    res.writeHead(404);
-    res.end('not found');
-  }
-});
-await new Promise((resolve) => server.listen(0, resolve));
-const base = `http://localhost:${server.address().port}`;
+const { server, baseUrl: base } = await serveDist(DIST);
 
 const ALL = routes(DIST).sort();
 

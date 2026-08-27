@@ -191,6 +191,18 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
     this.glitchCount = 0;
     this.maxGapMs = 0;
     this.lastCallbackTime = undefined;
+    // Mirrors the wasm side's own default (see the 'init' case below) and
+    // the JS side's 'play'/'pause' messages, so process() below knows
+    // whether to post a position at all — see this file's own comment
+    // there on why the old unconditional post kept flooding the polite
+    // live region after Pause.
+    this.playing = false;
+    // How many process() calls between position posts — computed once
+    // 'init' knows the real quantum/sampleRate, so it lands close to but
+    // never over ~4 posts/second regardless of what render quantum the
+    // wasm build uses.
+    this.positionIntervalCalls = 1;
+    this.lastPosition = undefined;
     this.port.onmessage = (event) => this.handleMessage(event.data);
   }
 
@@ -201,6 +213,13 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
           initSync({ module: new Uint8Array(data.wasmBytes) });
           this.player = new ModulePlayer(new Uint8Array(data.moduleBytes), sampleRate);
           this.quantum = ModulePlayer.renderQuantum();
+          // ModulePlayer's own constructor doc: it "start[s] it playing" —
+          // this mirrors that default rather than guessing, since nothing
+          // ever posts an explicit 'play' message for the very first start
+          // (see playModule() below: it connects the node and flips its
+          // own playing flag without ever sending 'play').
+          this.playing = true;
+          this.positionIntervalCalls = Math.max(1, Math.round(sampleRate / this.quantum / 4));
           this.refreshViews();
           this.port.postMessage({ type: 'ready' });
         } catch (error) {
@@ -210,9 +229,11 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
       }
       case 'play':
         if (this.player) this.player.set_playing(true);
+        this.playing = true;
         break;
       case 'pause':
         if (this.player) this.player.set_playing(false);
+        this.playing = false;
         break;
       case 'seek':
         if (this.player) this.player.seek_order(data.order);
@@ -263,14 +284,34 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
       if (output[1]) {
         output[1].set(this.right.subarray(0, rendered));
       }
-      if (this.callCount % 12 === 0) {
-        this.port.postMessage({
-          type: 'position',
+      // Posted at most ~4×/s (positionIntervalCalls, fixed once at init from
+      // the real quantum/sampleRate — this used to be a flat "every 12
+      // calls", ~31×/s at 128 samples/48kHz, an order of magnitude past what
+      // this file's own header comment always claimed) and never at all
+      // while paused — a paused transport holds its row (see
+      // ModulePlayer.set_playing's doc), so there is nothing new to say, and
+      // the old code posted unconditionally regardless of this.playing.
+      // Also skipped when the position hasn't actually changed since the
+      // last post, so a slow tune landing on the same row across several
+      // checks doesn't repost it.
+      if (this.playing && this.callCount % this.positionIntervalCalls === 0) {
+        const position = {
           order: this.player.order,
           pattern: this.player.pattern,
           row: this.player.row,
           tick: this.player.tick,
-        });
+        };
+        const last = this.lastPosition;
+        if (
+          !last ||
+          last.order !== position.order ||
+          last.pattern !== position.pattern ||
+          last.row !== position.row ||
+          last.tick !== position.tick
+        ) {
+          this.port.postMessage({ type: 'position', ...position });
+          this.lastPosition = position;
+        }
       }
     }
     return true;
