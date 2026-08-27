@@ -7,6 +7,8 @@
 // it will go next. Drawing the picture is Task 5; playing a module is
 // Task 8. Nothing here decodes anything.
 
+import init, { probe } from '@play198x/web';
+
 export type Route = 'image' | 'audio' | 'unknown';
 
 /** Mirrors the shape wasm-bindgen's `Probed` exposes across the JS boundary. */
@@ -72,31 +74,30 @@ export function classify(probed: ProbeResult | undefined, byteLength: number): R
   };
 }
 
-type Play198xWeb = typeof import('@play198x/web');
+let wasmReady: Promise<void> | undefined;
 
-// A plain `import('/wasm/play198x_web.js')` — even with `/* @vite-ignore */`
-// — still gets rewritten by Vite's modulepreload helper, which leaves an
-// unresolved `__VITE_PRELOAD__` in the output here because this script is
-// inlined into the page rather than emitted as its own chunk (the pass that
-// normally fills that placeholder in never runs). Building the import
-// through `Function` keeps the specifier out of Vite's static analysis
-// entirely, so nothing rewrites it: the browser resolves it exactly as it
-// resolves the equivalent import in index.astro's own inline probe script.
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-  specifier: string,
-) => Promise<Play198xWeb>;
-
-let wasmReady: Promise<Play198xWeb> | undefined;
-
-// The published package is copied to public/wasm/ by scripts/build-wasm.mjs
-// (see the prebuild hook) and loaded from there, exactly as the probe-of-life
-// check in src/pages/index.astro already does.
-function loadWasm(): Promise<Play198xWeb> {
+// A STATIC import, deliberately — not the dynamic import a previous version
+// of this file used. @play198x/web's init() resolves its .wasm binary via
+// `new URL('play198x_web_bg.wasm', import.meta.url)`, a pattern Vite
+// recognises natively for a static import and rewrites into a hashed,
+// bundled asset — no public/wasm/ copy, no plugin, no manual URL handling
+// needed. `player.ts` is a real module (unlike index.astro's `is:inline`
+// probe script, which has to reach into public/wasm/ by hand because being
+// inlined is exactly what keeps Vite from ever seeing it).
+//
+// Do not turn this back into a dynamic `import()`. A dynamic import here is
+// what triggered a real bug: Vite's modulepreload helper wraps dynamic
+// import() calls and leaves an unresolved `__VITE_PRELOAD__` token in the
+// output when the importing script gets inlined into the page rather than
+// emitted as its own chunk — the substitution pass that normally fills that
+// token in never runs, and the page throws a ReferenceError the first time a
+// file is dropped. A dynamic import also carries `unsafe-eval` risk the
+// moment anyone reaches for `Function`/`eval` to dodge that bug, which
+// defeats the point of a script-src CSP on a site whose whole pitch is that
+// nothing the visitor feeds it leaves their browser.
+function loadWasm(): Promise<void> {
   if (!wasmReady) {
-    wasmReady = dynamicImport('/wasm/play198x_web.js').then(async (mod) => {
-      await mod.default();
-      return mod;
-    });
+    wasmReady = init().then(() => undefined);
   }
   return wasmReady;
 }
@@ -117,7 +118,7 @@ export async function onFile(file: File): Promise<void> {
   const bytes = new Uint8Array(buffer);
 
   try {
-    const { probe } = await loadWasm();
+    await loadWasm();
     const probed = probe(bytes);
     report(classify(probed, bytes.byteLength).message);
   } catch (error) {
