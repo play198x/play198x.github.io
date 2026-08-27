@@ -11,3 +11,5 @@ _198x-ui/
 # Playwright's own test artifacts.
 test-results/
 playwright-report/
+# Copied out of the kit by scripts/fetch-ui.sh.
+public/fonts/
