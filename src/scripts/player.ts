@@ -76,14 +76,15 @@ export function classify(probed: ProbeResult | undefined, byteLength: number): R
 
 let wasmReady: Promise<void> | undefined;
 
-// A STATIC import, deliberately — not the dynamic import a previous version
-// of this file used. @play198x/web's init() resolves its .wasm binary via
-// `new URL('play198x_web_bg.wasm', import.meta.url)`, a pattern Vite
-// recognises natively for a static import and rewrites into a hashed,
-// bundled asset — no public/wasm/ copy, no plugin, no manual URL handling
-// needed. `player.ts` is a real module (unlike index.astro's `is:inline`
-// probe script, which has to reach into public/wasm/ by hand because being
-// inlined is exactly what keeps Vite from ever seeing it).
+// A STATIC import, deliberately. @play198x/web's init() resolves its .wasm
+// binary via `new URL('play198x_web_bg.wasm', import.meta.url)`, a pattern
+// Vite recognises natively on a static import and rewrites into a hashed,
+// bundled asset — no copied file at a fixed path, no plugin, no manual URL
+// handling needed. This is the only way the decoder gets loaded anywhere in
+// this repo now; there used to be a second, hand-copied path (a
+// public/wasm/ directory populated by a prebuild step, consumed by an
+// is:inline probe script on the index page) but it had no reason to exist
+// once this file could load the package directly, so both were removed.
 //
 // Do not turn this back into a dynamic `import()`. A dynamic import here is
 // what triggered a real bug: Vite's modulepreload helper wraps dynamic
@@ -94,7 +95,11 @@ let wasmReady: Promise<void> | undefined;
 // file is dropped. A dynamic import also carries `unsafe-eval` risk the
 // moment anyone reaches for `Function`/`eval` to dodge that bug, which
 // defeats the point of a script-src CSP on a site whose whole pitch is that
-// nothing the visitor feeds it leaves their browser.
+// nothing the visitor feeds it leaves their browser. If a future task needs
+// raw wasm bytes at a stable URL (Task 8's AudioWorklet, maybe), reach for
+// `new URL('@play198x/web/play198x_web_bg.wasm', import.meta.url)` first —
+// Vite resolves that to the same hashed asset without a copy step — and
+// only bring a copy step back if that turns out not to be enough.
 function loadWasm(): Promise<void> {
   if (!wasmReady) {
     wasmReady = init().then(() => undefined);
