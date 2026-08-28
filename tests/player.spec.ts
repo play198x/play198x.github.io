@@ -102,11 +102,21 @@ test('a dropped synthetic ProTracker module plays in the real, built page', asyn
       const format = await audioPanel.locator('#audio-format').textContent();
       assert.match(format ?? '', /ProTracker/, `expected a ProTracker identification, got "${format}"`);
 
-      // The module is 1084 bytes, which describeSize() in player.ts renders
-      // as "1.1 KiB" (1084 / 1024, toFixed(1)) — the length the player
-      // reports must reflect the dropped file's real size, not a placeholder.
+      // Length is the song's duration now, not the file size — see
+      // showAudioPlayer()'s doc. This fixture is a bare 1084-byte header:
+      // the song-length byte is zero and no pattern follows the magic, so the
+      // order table is empty and the timing walk has nothing to walk. That is
+      // a real zero rather than a rounding one, and describeDuration() prints
+      // it as 0:00 precisely so it cannot be confused with a song too short
+      // to round up. A module with orders in it never reads 0:00.
       const length = await audioPanel.locator('#audio-length').textContent();
-      assert.equal(length, '1.1 KiB', `expected the real file size, got "${length}"`);
+      assert.equal(length, '0:00', `expected an empty song's duration, got "${length}"`);
+
+      // Four voices, from the module's own magic rather than assumed: `M.K.`
+      // names a 4-channel module, and a binding that lost the field would
+      // leave this blank rather than wrong.
+      const voices = await audioPanel.locator('#audio-voices').textContent();
+      assert.equal(voices, '4', `expected 4 voices, got "${voices}"`);
 
       // The transport: a visitor must see a way to start playback.
       const playButton = audioPanel.locator('#audio-play-button');
