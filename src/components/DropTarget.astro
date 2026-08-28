@@ -98,7 +98,15 @@
    * box rather than replacing one shape with a different one — the page used
    * to jump at the exact moment the visitor did the thing the site is for.
    * The dashed border is the one thing kept apart, because it is what says
-   * "target" rather than "panel"; it goes solid on drag-over. */
+   * "target" rather than "panel"; it goes solid on drag-over.
+   *
+   * Both sit on --h-page while the hero band around them is --h-ground, so
+   * they read as cards on the band rather than shapes drawn on the same
+   * colour. The pair behaves differently per theme and that is the point:
+   * light puts the cards above the band, which is what the shadow half of
+   * the lift ladder is for; dark recesses them, and the paper glow shows
+   * around the edge instead. A thing you drop media into and watch a screen
+   * appear in is better recessed than raised. */
   .drop-target {
     display: flex;
     flex-direction: column;
@@ -107,7 +115,7 @@
     padding: clamp(var(--h-space-6), 4vw, var(--h-space-8));
     border: 2px dashed var(--h-line);
     border-radius: 8px;
-    background: var(--h-ground);
+    background: var(--h-page);
     box-shadow: var(--h-lift-1);
     text-align: center;
     font-family: var(--h-font-ui);
@@ -121,10 +129,13 @@
       box-shadow var(--h-decay) var(--h-ease);
   }
 
+  /* --h-ground, because --h-page is the resting card now: drag-over has to
+     move somewhere, and the band's own ground is the one surface in the set
+     that is not already in use here. */
   .drop-target.is-active {
     border-color: var(--h-accent);
     border-style: solid;
-    background: var(--h-page);
+    background: var(--h-ground);
     box-shadow: var(--h-lift-1);
     transition-duration: var(--h-rise);
   }
@@ -171,7 +182,7 @@
     padding: var(--h-space-2) var(--h-space-6);
     border: 1px solid var(--h-line);
     border-radius: 6px;
-    background: var(--h-page);
+    background: var(--h-ground);
     color: var(--h-ink-body);
     font: inherit;
     cursor: pointer;
@@ -180,14 +191,17 @@
       box-shadow var(--h-decay) var(--h-ease);
   }
 
+  /* Same wash as the play button's, for the same reason — see Player.astro. */
   .drop-target-input:hover::file-selector-button {
     border-color: var(--h-accent);
+    background: color-mix(in oklab, var(--h-accent) 9%, var(--h-ground));
     box-shadow: var(--h-lift-1);
     transition-duration: var(--h-rise);
   }
 
   .drop-target-input:focus-visible::file-selector-button {
     border-color: var(--h-accent);
+    background: color-mix(in oklab, var(--h-accent) 9%, var(--h-ground));
     box-shadow: var(--h-lift-1);
   }
 
