@@ -181,15 +181,11 @@ async function drop(page, file, bytes) {
   );
 }
 
-/** Runs axe over whatever the page is currently showing and folds any
- * serious or critical violation into `findings`. Called once per state, not
- * once per route — see this file's header comment. */
-async function audit(page, state, theme) {
-  await page.addScriptTag({ content: AXE });
-  const result = await page.evaluate(async () => await window.axe.run(document, {
-    resultTypes: ['violations'],
-    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
-  }));
+/** Folds any serious or critical violation from an axe result into
+ * `findings`, keyed by defect. Shared by the whole-page pass and the
+ * interaction passes below, so a defect found in a hover state is reported in
+ * the same shape as one found on load. */
+function collect(result, state, theme) {
   audited.add(`${state} (${theme})`);
 
   for (const violation of result.violations) {
@@ -223,6 +219,107 @@ async function audit(page, state, theme) {
   }
 }
 
+/** Runs axe over whatever the page is currently showing. Called once per
+ * state, not once per route — see this file's header comment. */
+async function audit(page, state, theme) {
+  await page.addScriptTag({ content: AXE });
+  const result = await page.evaluate(async () => await window.axe.run(document, {
+    resultTypes: ['violations'],
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
+  }));
+  collect(result, state, theme);
+}
+
+/**
+ * The states a pointer and a keyboard put the page into, which the pass above
+ * cannot reach.
+ *
+ * axe reads the DOM as it stands, and `:hover` and `:focus-visible` styles are
+ * not in it until something actually hovers or focuses. That blind spot is not
+ * theoretical: three of the four contrast defects fixed on 2026-08-28 lived in
+ * exactly these states — `.drop-target.is-active`, and the hover/focus rules of
+ * the play button and the archive entries — and the whole-page sweep passed
+ * over every one of them. A focus style that fails contrast fails the keyboard
+ * users who depend on it most, so these are the states least able to afford
+ * going unmeasured.
+ *
+ * Only `color-contrast` runs here. The structural rules — labelling, roles,
+ * headings — do not change under a pointer, so re-running the full set per
+ * element would multiply the sweep's cost to re-derive the same answer.
+ *
+ * Hover and focus are driven separately and honestly. Hover moves the real
+ * mouse. Focus parks the mouse off the page first and then tabs, because
+ * `:focus-visible` matches keyboard focus and not a programmatic `.focus()`
+ * call — and because with the mouse left where the hover pass put it, a
+ * `:hover, :focus-visible` rule would report a hover defect as a focus one.
+ */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), select, input:not([type="hidden"]), [tabindex]:not([tabindex="-1"])';
+
+const CONTRAST_ONLY = {
+  resultTypes: ['violations'],
+  runOnly: { type: 'rule', values: ['color-contrast'] },
+};
+
+/** What to call an element in a state label: its id if it has one, else its
+ * first class, else its tag. */
+const describe = (node) =>
+  node.id || (node.className && String(node.className).split(/\s+/)[0]) || node.tagName.toLowerCase();
+
+async function auditHoverStates(page, state, theme) {
+  await page.addScriptTag({ content: AXE });
+  for (const element of await page.$$(FOCUSABLE)) {
+    if (!(await element.isVisible())) continue;
+    try {
+      await element.hover({ timeout: 2000 });
+    } catch {
+      // An element that cannot be hovered (covered, off-screen, moving) is not
+      // a defect and not this gate's business. Skip it rather than fail.
+      continue;
+    }
+    const name = await element.evaluate(describe);
+    const result = await element.evaluate(
+      async (node, options) => await window.axe.run(node, options),
+      CONTRAST_ONLY,
+    );
+    collect(result, `${state} :hover ${name}`, theme);
+  }
+}
+
+async function auditFocusStates(page, state, theme) {
+  await page.addScriptTag({ content: AXE });
+  // Off the page entirely, so no lingering :hover is read as a focus defect.
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => document.body.focus());
+
+  let first;
+  // The stop condition is the same DOM node coming back round, not the same
+  // name: an unlabelled link describes as "a" like every other one, and a
+  // name-based check halted the walk at the second link on the page — with
+  // the play button, the control this gate most wants to see, still ahead of
+  // it. The cap is the backstop for a focus trap or focus leaving into
+  // browser chrome and returning elsewhere.
+  for (let stop = 0; stop < 40; stop++) {
+    await page.keyboard.press('Tab');
+    const active = await page.evaluateHandle(() => document.activeElement);
+
+    const isBody = await active.evaluate((node) => !node || node === document.body);
+    if (isBody) break;
+    if (first && (await active.evaluate((node, start) => node === start, first))) break;
+    first ??= active;
+
+    const name = await active.evaluate(describe);
+    const result = await active.evaluate(
+      async (node, options) => await window.axe.run(node, options),
+      CONTRAST_ONLY,
+    );
+    // Indexed because names repeat — every unlabelled link is "a" — and two
+    // stops sharing a label would collapse into one in the audited set and
+    // undercount what was actually reached.
+    collect(result, `${state} :focus[${stop}] ${name}`, theme);
+  }
+}
+
 const browser = await chromium.launch();
 for (const theme of ['light', 'dark']) {
   const context = await browser.newContext({
@@ -238,6 +335,8 @@ for (const theme of ['light', 'dark']) {
 
     await page.goto(base + route, { waitUntil: 'load' });
     await audit(page, route, theme);
+    await auditHoverStates(page, route, theme);
+    await auditFocusStates(page, route, theme);
 
     // The drop target is what makes a route interactive, so its presence —
     // not a hardcoded '/' — decides whether there are further states to
@@ -257,7 +356,10 @@ for (const theme of ['light', 'dark']) {
           server.close();
           process.exit(1);
         }
-        await audit(page, `${route} [${state.name}]`, theme);
+        const label = `${route} [${state.name}]`;
+        await audit(page, label, theme);
+        await auditHoverStates(page, label, theme);
+        await auditFocusStates(page, label, theme);
       }
     }
   }
@@ -268,10 +370,19 @@ server.close();
 
 const out = [...findings.values()].sort((a, b) => (a.worst?.ratio ?? 99) - (b.worst?.ratio ?? 99));
 // `skipped` and `audited` both accumulate once per theme, so both are halved
-// to report pages rather than passes.
-const states = audited.size / 2;
-console.log(`a11y: ${states} page state(s) × 2 themes, ${skipped.length / 2} redirect stub(s) skipped — ${out.length} defect(s)`);
-for (const state of [...audited].filter((entry) => entry.endsWith('(light)'))) {
+// to report pages rather than passes. Interaction states are counted apart
+// from page states: there are many of them and they are per-element, so
+// folding them into one number would make the page count look like progress
+// it is not, and listing them all would bury the page states under their own
+// detail.
+const light = [...audited].filter((entry) => entry.endsWith('(light)'));
+const pageStates = light.filter((entry) => !/ :(hover|focus)[[ ]/.test(entry));
+const interactionStates = light.length - pageStates.length;
+console.log(
+  `a11y: ${pageStates.length} page state(s) + ${interactionStates} interaction state(s) × 2 themes, ` +
+    `${skipped.length / 2} redirect stub(s) skipped — ${out.length} defect(s)`,
+);
+for (const state of pageStates) {
   console.log(`  audited: ${state.replace(' (light)', '')}`);
 }
 console.log('');
