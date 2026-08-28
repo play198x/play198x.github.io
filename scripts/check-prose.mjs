@@ -38,6 +38,64 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// Counting alerts still cannot tell "nothing was wrong" from "nothing was
+// checked". `.vale/` is gitignored and filled by `vale sync` from the release
+// named in .vale.ini, so the styles can legitimately be missing on a fresh
+// clone or in a CI job whose sync step did not run.
+//
+// Vale splits that state in two, and only one half is already covered. A
+// style family absent from StylesPath is an error: E100 on stderr, nothing on
+// stdout, exit 2 — which the empty-report guard below turns into a failure. A
+// style *directory* that exists but holds no rule files is not an error to
+// vale. It lints with an empty rule set, prints `{}` and exits 0, and the
+// alert count is then zero because no rule ever ran.
+//
+// `vale ls-config` cannot separate them: its `Checks` and `SBaseStyles` are
+// read back out of .vale.ini, so they name House198x whether or not a single
+// rule was loaded from disk. Both states report the same configuration.
+//
+// So prove it from the outside instead — lint copy the house style is known
+// to flag and require the alerts to come back. This sentence trips four rules
+// from four different files ("utilize", "very", "simple", "color"), and one
+// surviving alert is enough, so retiring any one rule upstream does not turn
+// the check into a false failure.
+const CANARY =
+  '<html><body><p>We utilize a very simple approach to optimize the color.</p></body></html>';
+
+function canaryReport() {
+  try {
+    return execFileSync('vale', ['--ext=.html', '--output=JSON'], {
+      input: CANARY,
+      encoding: 'utf8',
+    });
+  } catch (err) {
+    // A house style carrying an error-severity rule would make vale exit
+    // non-zero over the canary while still reporting properly, so a usable
+    // report on stdout counts as a run. Anything else is vale failing.
+    if (err.stdout?.trim()) return err.stdout;
+    const detail = (err.stderr || err.message || '').trim();
+    console.error(`prose: vale could not lint its own canary: ${detail}`);
+    process.exit(1);
+  }
+}
+
+let canaryAlerts = 0;
+try {
+  const parsed = JSON.parse(canaryReport());
+  canaryAlerts = Object.values(parsed)
+    .filter(Array.isArray)
+    .reduce((total, list) => total + list.length, 0);
+} catch {
+  console.error('prose: vale did not return JSON for its own canary.');
+  process.exit(1);
+}
+
+if (canaryAlerts === 0) {
+  console.error('prose: vale found nothing in a sentence the house style is written to flag.');
+  console.error('prose: the styles are not loaded — run `vale sync`, then build and try again.');
+  process.exit(1);
+}
+
 // Vale's exit code tracks errors, not suggestions, so trusting it would let
 // every suggestion through while printing a pass — the same hollow green this
 // script exists to stop. Count the alerts instead.
