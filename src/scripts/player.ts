@@ -651,6 +651,33 @@ async function handleAudioPlayClick(): Promise<void> {
       lastPositionText = text;
       positionEl.textContent = text;
     });
+    // A worklet that dies mid-tune (see audio.ts's post-ready
+    // onprocessorerror handler) leaves nothing playing but would otherwise
+    // leave the transport saying otherwise: the button still reading Pause,
+    // the status line still empty, and silence the only clue. Put the
+    // failure where every other audio failure goes — the panel's status
+    // line — and hand the panel back in the state showAudioPlayer() left it,
+    // so the visitor can press Play and start over. `pendingAudioBytes`
+    // survives a start, so that second press has everything it needs.
+    //
+    // The generation check is the same guard the await above uses: a new
+    // drop may have replaced this tune between the crash and this listener
+    // running, and the panel on screen then belongs to something else.
+    handle.onError((failure: Error) => {
+      if (token !== audioGeneration) {
+        return;
+      }
+      handle.dispose();
+      currentAudio = undefined;
+      setPlayButtonLabel('Play');
+      const current = audioElements();
+      if (current.status) {
+        current.status.textContent = `Playback stopped: ${failure.message}`;
+      }
+      if (current.playButton) {
+        current.playButton.disabled = false;
+      }
+    });
     setPlayButtonLabel('Pause');
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
