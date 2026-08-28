@@ -1,0 +1,45 @@
+---
+/**
+ * The page footer: the family strip, then this site's standing rights notice.
+ *
+ * The strip is the kit's own component rather than a line of links written
+ * here. Its wording and behaviour are fixed by
+ * 198x/decisions/sibling-cross-promotion.md, and a hand-written copy would be
+ * a second place that decision has to be applied by hand.
+ *
+ * It sits outside .container on purpose: the strip insets itself with
+ * --h-inset and draws its own top rule, the same way the shared nav does.
+ * Wrapping it in the container indented it twice and put a second rule above
+ * the one it had already drawn.
+ */
+import FamilyStrip from '@198x-ui/components/FamilyStrip.astro';
+---
+
+<footer class="site-footer">
+  <FamilyStrip />
+
+  <div class="container">
+    <!-- Standing rights notice: this page renders third-party works — the
+         pictures and music a visitor drops on it — even though it never
+         serves or stores any of it. See
+         198x/decisions/publishing-third-party-imagery.md and the rights
+         position in docs/specs/2026-08-26-website-design.md. -->
+    <p class="site-rights">
+      This page decodes and plays whatever you drop on it — pictures and music made by other
+      people. Play198x does not store, host, or redistribute any of it. Nothing you provide here
+      leaves your browser.
+    </p>
+  </div>
+</footer>
+
+<style>
+  .site-rights {
+    max-width: var(--h-measure);
+    padding-block: var(--h-space-4);
+    padding-bottom: calc(var(--h-space-6) + env(safe-area-inset-bottom));
+    font-family: var(--h-font-ui);
+    font-size: var(--h-text-micro);
+    line-height: var(--h-lh-micro);
+    color: var(--h-ink-muted);
+  }
+</style>

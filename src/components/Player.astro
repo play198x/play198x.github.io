@@ -88,13 +88,14 @@
   .player-panel {
     display: flex;
     flex-wrap: wrap;
-    gap: 1.5rem;
+    gap: var(--h-space-6);
     align-items: flex-start;
-    margin-top: 1.5rem;
-    padding: clamp(1rem, 4vw, 1.75rem);
+    margin-top: var(--h-space-6);
+    padding: clamp(var(--h-space-4), 4vw, var(--h-space-8));
     border: 1px solid var(--h-line);
     border-radius: 8px;
     background: var(--h-ground);
+    box-shadow: var(--h-lift-1);
     font-family: var(--h-font-ui);
     color: var(--h-ink-body);
   }
@@ -114,7 +115,7 @@
   .player-info {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--h-space-3);
     min-width: 16rem;
     flex: 1 1 16rem;
   }
@@ -122,50 +123,54 @@
   .player-meta {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 0.25rem 0.75rem;
+    gap: var(--h-space-1) var(--h-space-3);
     margin: 0;
   }
 
   .player-meta dt {
     color: var(--h-ink-muted);
-    font-size: 0.85em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
   }
 
   .player-meta dd {
     margin: 0;
     font-family: var(--h-font-mono);
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
   }
 
   .player-confidence-note {
     margin: 0;
-    padding: 0.5rem 0.75rem;
+    padding: var(--h-space-2) var(--h-space-3);
     border-left: 3px solid var(--h-accent);
     background: var(--h-page);
     color: var(--h-ink-body);
-    font-size: 0.85em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
   }
 
   .player-override-wrap {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--h-space-2);
   }
 
   .player-override-label {
     color: var(--h-ink-muted);
-    font-size: 0.85em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
   }
 
   .player-override {
     font-family: inherit;
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
   }
 
   .player-palette {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem;
+    gap: var(--h-space-1);
   }
 
   :global(.player-swatch) {
@@ -178,7 +183,7 @@
 
   .audio-play-button {
     align-self: flex-start;
-    padding: 0.5rem 1.25rem;
+    padding: var(--h-space-2) var(--h-space-6);
     border: 1px solid var(--h-line);
     border-radius: 6px;
     background: var(--h-ground);
@@ -191,6 +196,7 @@
   .audio-play-button:focus-visible {
     border-color: var(--h-accent);
     background: var(--h-page);
+    box-shadow: var(--h-lift-1);
   }
 
   .audio-play-button:disabled {
@@ -201,14 +207,16 @@
   .audio-position {
     margin: 0;
     font-family: var(--h-font-mono);
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
     color: var(--h-ink-muted);
     min-height: 1.2em;
   }
 
   .audio-status {
     margin: 0;
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
     color: var(--h-ink-body);
   }
 </style>

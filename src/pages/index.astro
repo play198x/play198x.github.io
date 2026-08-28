@@ -1,96 +1,74 @@
 ---
-import '@198x-ui/tokens.css';
-import '@198x-ui/fonts.css';
-import Plate from '@198x-ui/components/Plate.astro';
-import SiteNav from '@198x-ui/components/SiteNav.astro';
+import BaseLayout from '../layouts/BaseLayout.astro';
 import DropTarget from '../components/DropTarget.astro';
 import Player from '../components/Player.astro';
 
-const items = [{ label: 'Play198x', href: '/', current: true }];
+const description = 'Play198x: a retro media player that runs entirely in your browser.';
 ---
 
-<!doctype html>
-<!-- data-tint carries the project colour as an ambient ground, at the
-     ceilings fixed in the kit's tokens.css. See family-visual-identity.md §3b. -->
-<html lang="en" data-tint="play">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Play198x: a retro media player that runs entirely in your browser." />
-    <title>Play198x</title>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="16x16 32x32" />
-    <link rel="canonical" href="https://play198x.github.io/" />
-    <link rel="sitemap" href="/sitemap-index.xml" />
+<BaseLayout title="Play198x" description={description} canonical="https://play198x.github.io/">
+  <!-- The hero is the player. This site does not describe a thing you could
+       go and use; it is the thing, so the drop target sits in the hero rather
+       than below a row of buttons pointing at it. There is no button row for
+       the same reason the Downloads section below says what it says: there is
+       no application to send anyone to yet, and a call to action leading to
+       "not yet" is worse than none. -->
+  <section class="hero band">
+    <div class="container">
+      <p class="eyebrow">A retro media player</p>
+      <h1 class="hero-title">Play198x</h1>
+      <p class="hero-lead">
+        Play198x plays retro media in your browser. Drop a file below to play it — nothing you feed
+        it ever leaves your browser.
+      </p>
 
-    <!-- Open Graph / Twitter card: a bare title-and-description unfurl is
-         what a soft launch shared into Slack/Mastodon/Discord actually gets
-         without these — no image, no site name, a generic globe in every
-         tab. No og:image: the family's rights position is that no
-         third-party media (the pictures and music a visitor drops here) is
-         ever committed to a repo, and the only art that could stand in for
-         one — the 198x-ui kit's wordmarks — lives in _198x-ui/, which is
-         git-ignored and fetched at build time, so nothing from it can be
-         committed here either. A correct text-only unfurl beats an invented
-         image. -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://play198x.github.io/" />
-    <meta property="og:title" content="Play198x" />
-    <meta
-      property="og:description"
-      content="Play198x: a retro media player that runs entirely in your browser."
-    />
-    <meta property="og:site_name" content="Play198x" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Play198x" />
-    <meta
-      name="twitter:description"
-      content="Play198x: a retro media player that runs entirely in your browser."
-    />
-  </head>
-  <body>
-    <SiteNav prefix="play" project="play" items={items} />
-    <main>
-      <Plate prefix="play" project="play" size={28} />
-      <h1>Play198x</h1>
-      <p>Play198x plays retro media in your browser. Drop a file below to play it — nothing you feed it ever leaves your browser.</p>
       <DropTarget />
       <Player />
+    </div>
+  </section>
 
-      <section class="below-fold" aria-labelledby="what-it-is-heading">
-        <h2 id="what-it-is-heading">What Play198x is</h2>
-        <p>Play198x renders media. It does not boot a machine, run a program, or emulate a CPU.</p>
-        <p>
-          A ZX Spectrum SCREEN$ or a Commodore 64 bitmap opens the way a photo does; a ProTracker
-          module plays the way an MP3 does: read, decoded, and shown or heard.
-        </p>
-        <p>
-          Every file you drop stays in your browser. Play198x decodes it there and never uploads,
-          stores, or transmits it.
-        </p>
-      </section>
+  <section class="band">
+    <div class="container">
+      <div class="columns">
+        <section class="prose" aria-labelledby="what-it-is-heading">
+          <h2 id="what-it-is-heading">What Play198x is</h2>
+          <p>Play198x renders media. It does not boot a machine, run a program, or emulate a CPU.</p>
+          <p>
+            A ZX Spectrum SCREEN$ or a Commodore 64 bitmap opens the way a photo does; a ProTracker
+            module plays the way an MP3 does: read, decoded, and shown or heard.
+          </p>
+          <p>
+            Every file you drop stays in your browser. Play198x decodes it there and never uploads,
+            stores, or transmits it.
+          </p>
+        </section>
 
-      <section class="below-fold" aria-labelledby="what-it-plays-heading">
-        <h2 id="what-it-plays-heading">What it plays today</h2>
-        <p>
-          Play198x reads five formats: ZX Spectrum SCREEN$, Commodore 64 Koala Paint, Commodore 64
-          Art Studio, Amiga IFF ILBM, and ProTracker MOD.
-        </p>
-        <p>
-          It does not yet play SID or AY chiptunes. Both need chip emulation that lives in Emu198x,
-          and Emu198x's chip crates are not published yet
-          (<a href="https://github.com/emu198x/emu198x/issues/1214">emu198x/emu198x#1214</a>).
-        </p>
-        <p>
-          It opens plain files, ZIP archives, and Amiga ADF disk images (the standard density; not
-          the high-density format), and decompresses PowerPacker-compressed entries on the way in.
-          A ZIP of supported files opens, and an ADF opens. A ZIP of ADFs — the shape most TOSEC
-          Amiga sets use — opens too, but the disk image inside it is listed as unrecognised. This
-          player reads a disk image you drop on it, not one nested inside an archive.
-        </p>
-      </section>
+        <section class="prose" aria-labelledby="what-it-plays-heading">
+          <h2 id="what-it-plays-heading">What it plays today</h2>
+          <p>
+            Play198x reads five formats: ZX Spectrum SCREEN$, Commodore 64 Koala Paint, Commodore 64
+            Art Studio, Amiga IFF ILBM, and ProTracker MOD.
+          </p>
+          <p>
+            It does not yet play SID or AY chiptunes. Both need chip emulation that lives in Emu198x,
+            and Emu198x's chip crates are not published yet
+            (<a href="https://github.com/emu198x/emu198x/issues/1214">emu198x/emu198x#1214</a>).
+          </p>
+          <p>
+            It opens plain files, ZIP archives, and Amiga ADF disk images (the standard density; not
+            the high-density format), and decompresses PowerPacker-compressed entries on the way in.
+            A ZIP of supported files opens, and an ADF opens. A ZIP of ADFs — the shape most TOSEC
+            Amiga sets use — opens too, but the disk image inside it is listed as unrecognised. This
+            player reads a disk image you drop on it, not one nested inside an archive.
+          </p>
+        </section>
+      </div>
+    </div>
+  </section>
 
-      <section class="below-fold" aria-labelledby="downloads-heading">
+  <section class="band band-quiet">
+    <div class="container">
+      <section class="prose" aria-labelledby="downloads-heading">
         <h2 id="downloads-heading">Downloads</h2>
         <p>There is no desktop application to download yet.</p>
         <p>
@@ -101,88 +79,55 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
           WebAssembly build running this page. Neither ships a standalone application.
         </p>
       </section>
-    </main>
+    </div>
+  </section>
+</BaseLayout>
 
-    <footer class="site-footer">
-      <!-- Standing rights notice: this page renders third-party works — the
-           pictures and music a visitor drops on it — even though it never
-           serves or stores any of it. See
-           198x/decisions/publishing-third-party-imagery.md and the rights
-           position in docs/specs/2026-08-26-website-design.md. -->
-      <p>
-        This page decodes and plays whatever you drop on it — pictures and music made by other
-        people. Play198x does not store, host, or redistribute any of it. Nothing you provide here
-        leaves your browser.
-      </p>
-    </footer>
+<style>
+  /* The hero carries the tinted ground; the bands below alternate off it, so
+     the page reads as sections without a rule drawn under each one. */
+  .hero {
+    background: var(--h-ground);
+    border-bottom: 1px solid var(--h-line);
+    padding-bottom: var(--h-space-12);
+  }
 
-    <style is:global>
-      /* `hidden` must actually hide, for EVERY component on the page, not
-       * just the ones that happened to remember this. The browser's own
-       * `[hidden] { display: none }` rule lives in the user-agent
-       * stylesheet, and ANY normal-weight author rule beats ANY user-agent
-       * rule regardless of selector specificity — the origin is compared
-       * before specificity is. DropTarget.astro and Player.astro both set
-       * `display: flex`/`display: grid` on elements they also toggle
-       * `hidden` on, so without an author-level override, setting
-       * `.hidden = true` left them visibly on screen (confirmed live on the
-       * public site: an empty black canvas showing before any file was ever
-       * dropped). This used to be copied into each Astro-scoped component
-       * style block that needed it — two separate tasks independently
-       * rediscovered the same collision — which meant a third component
-       * would hit it again; it belongs once, unscoped, here, so every
-       * component gets it for free. `!important` is what browsers' own
-       * resets use for this exact collision — nothing short of it survives
-       * a future rule that sets `display` on a hidden element again. */
-      [hidden] {
-        display: none !important;
-      }
-    </style>
+  /* The one place a size is not read straight from the scale. --h-text-display
+     is 4rem, which is right at container width and wider than a phone at
+     375px. The clamp runs between two rungs of the same ladder — h1 and
+     display — so it never lands outside the scale, only between its ends. */
+  .hero-title {
+    font-size: clamp(var(--h-text-h1), 11vw, var(--h-text-display));
+    line-height: var(--h-lh-display);
+    letter-spacing: var(--h-tr-display);
+  }
 
-    <style>
-      /* The page had no ground/ink rule of its own before this task — the
-       * hero content above (h1/p) happens to read fine in black-on-white
-       * regardless of theme, so the gap was invisible. The sections below
-       * use the theme-aware ink tokens the rest of the kit uses (so they
-       * read correctly in dark mode too), and those tokens assume the page
-       * itself is painted in --h-page/--h-ground: without this rule, dark
-       * mode's light ink tokens (meant for a dark ground) sat on the
-       * browser's default white background, which is how the a11y sweep
-       * caught this — four `serious` contrast failures, dark theme only. */
-      body {
-        background: var(--h-page);
-        color: var(--h-ink-body);
-      }
+  .hero-lead {
+    max-width: var(--h-measure);
+    margin-top: var(--h-space-4);
+    font-size: var(--h-text-lead);
+    line-height: var(--h-lh-lead);
+  }
 
-      .below-fold {
-        max-width: 68ch;
-        margin: 3rem auto 0;
-        font-family: var(--h-font-read);
-        color: var(--h-ink-body);
-      }
+  /* The drop target is the call to action, so it gets the room a button row
+     would have taken. */
+  .hero :global(.drop-target) {
+    margin-top: var(--h-space-8);
+  }
 
-      .below-fold h2 {
-        font-family: var(--h-font-ui);
-        color: var(--h-ink);
-      }
+  /* Two columns where there is room for two measures side by side, one column
+     below that. The floor is the text itself: a column narrower than the copy
+     wants to be reads worse than a column that waited its turn. */
+  .columns {
+    display: grid;
+    gap: var(--h-space-12);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 34ch), 1fr));
+  }
 
-      .below-fold p {
-        line-height: 1.5;
-      }
-
-      .below-fold a {
-        color: var(--h-accent-ink);
-      }
-
-      .site-footer {
-        max-width: 68ch;
-        margin: 3rem auto 0;
-        padding: 1rem clamp(1rem, 4vw, 2.25rem) calc(2rem + env(safe-area-inset-bottom));
-        border-top: 1px solid var(--h-line);
-        font-family: var(--h-font-ui);
-        font-size: 0.82rem;
-        color: var(--h-ink-muted);
-      }
-    </style>
-  </body>
-</html>
+  .columns h2 {
+    font-size: var(--h-text-h3);
+    line-height: var(--h-lh-h3);
+    letter-spacing: var(--h-tr-h3);
+    font-weight: var(--h-weight-minor);
+  }
+</style>

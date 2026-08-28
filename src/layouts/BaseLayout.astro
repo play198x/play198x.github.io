@@ -1,0 +1,71 @@
+---
+/**
+ * Every page's shell: head, the shared nav, the page, the footer.
+ *
+ * One page needs a layout as much as ten do — this is where the head, the
+ * token imports and the furniture live so a page file is only the page. The
+ * shape mirrors emu198x.github.io, which is what
+ * docs/specs/2026-08-26-website-design.md says this site follows.
+ */
+import '@198x-ui/tokens.css';
+import '@198x-ui/fonts.css';
+import '../styles/global.css';
+import SiteNav from '@198x-ui/components/SiteNav.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+
+interface Props {
+  title: string;
+  description: string;
+  canonical: string;
+}
+
+const { title, description, canonical } = Astro.props;
+
+/* No nav items. The kit's nav takes a site's information architecture as
+ * props, and this site has one page — a single item labelled with the site's
+ * own name, sitting beside the plate that already says it, is a link to where
+ * the reader is. It comes back the moment there is a second page. */
+const items = [];
+---
+
+<!doctype html>
+<!-- data-tint carries the project colour as an ambient ground, at the
+     ceilings fixed in the kit's tokens.css. See family-visual-identity.md §3b. -->
+<html lang="en" data-tint="play">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" sizes="16x16 32x32" />
+    <link rel="canonical" href={canonical} />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+
+    <!-- Open Graph / Twitter card: a bare title-and-description unfurl is
+         what a soft launch shared into Slack/Mastodon/Discord actually gets
+         without these — no image, no site name, a generic globe in every
+         tab. No og:image: the family's rights position is that no
+         third-party media (the pictures and music a visitor drops here) is
+         ever committed to a repo, and the only art that could stand in for
+         one — the 198x-ui kit's wordmarks — lives in _198x-ui/, which is
+         git-ignored and fetched at build time, so nothing from it can be
+         committed here either. A correct text-only unfurl beats an invented
+         image. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:site_name" content="Play198x" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+  </head>
+  <body>
+    <SiteNav prefix="play" project="play" items={items} />
+    <main>
+      <slot />
+    </main>
+    <SiteFooter />
+  </body>
+</html>
