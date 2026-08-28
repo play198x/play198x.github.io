@@ -1,0 +1,147 @@
+/* The house layer: the family's tokens applied to this site's furniture.
+ *
+ * Governed by 198x/decisions/family-visual-identity.md. Everything here reads
+ * from --h-* tokens and defines almost nothing of its own, because every value
+ * this file invented would be a value the family record no longer controls.
+ * The three exceptions are named where they appear.
+ *
+ * §6 is the section this file exists to honour: one scale for type, one unit
+ * for space, one ladder for lift. Sizes come from --h-text-*, their
+ * line-heights from --h-lh-*, their tracking from --h-tr-*; spacing comes from
+ * --h-space-*, which is one 4px unit; elevation comes from --h-lift-*, which
+ * renders as shadow in light and glow in dark because a dark ground is not
+ * paper.
+ */
+
+/* `hidden` must actually hide, for EVERY component on the page, not just the
+ * ones that happened to remember this. The browser's own `[hidden] { display:
+ * none }` rule lives in the user-agent stylesheet, and ANY normal-weight
+ * author rule beats ANY user-agent rule regardless of selector specificity —
+ * the origin is compared before specificity is. DropTarget.astro and
+ * Player.astro both set `display: flex`/`display: grid` on elements they also
+ * toggle `hidden` on, so without an author-level override, setting
+ * `.hidden = true` left them visibly on screen (confirmed live on the public
+ * site: an empty black canvas showing before any file was ever dropped). This
+ * used to be copied into each Astro-scoped component style block that needed
+ * it — two separate tasks independently rediscovered the same collision —
+ * which meant a third component would hit it again; it belongs once, unscoped,
+ * here, so every component gets it for free. `!important` is what browsers'
+ * own resets use for this exact collision — nothing short of it survives a
+ * future rule that sets `display` on a hidden element again. */
+[hidden] {
+  display: none !important;
+}
+
+:root {
+  color-scheme: light dark;
+
+  /* The page's outer width. Not a family token: the kit ships components, not
+   * layouts, so how wide a site runs is the site's decision. */
+  --container: 1120px;
+
+  /* The kit's nav and footer inset themselves with --h-inset. Left alone they
+   * sit a few pixels inside .container and the nav plate misses the hero
+   * beneath it. Overriding it to the container's own gutter lines the two up
+   * at every width: the max() keeps the small-screen gutter when the viewport
+   * is narrower than the container. */
+  --h-inset: max(var(--h-space-4), calc((100vw - var(--container)) / 2 + var(--h-space-4)));
+}
+
+body {
+  margin: 0;
+  background: var(--h-page);
+  color: var(--h-ink-body);
+  font-family: var(--h-font-read);
+  font-size: var(--h-text-body);
+  line-height: var(--h-lh-body);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--h-font-ui);
+  color: var(--h-ink);
+}
+
+h1 {
+  font-size: var(--h-text-h1);
+  line-height: var(--h-lh-h1);
+  letter-spacing: var(--h-tr-h1);
+  font-weight: var(--h-weight-major);
+}
+
+h2 {
+  font-size: var(--h-text-h2);
+  line-height: var(--h-lh-h2);
+  letter-spacing: var(--h-tr-h2);
+  font-weight: var(--h-weight-major);
+}
+
+h3 {
+  font-size: var(--h-text-h3);
+  line-height: var(--h-lh-h3);
+  letter-spacing: var(--h-tr-h3);
+  font-weight: var(--h-weight-minor);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--h-accent-ink);
+}
+
+/* ---- Layout -------------------------------------------------------------
+ * A band is a full-width horizontal stripe; the container inside it holds the
+ * content to a readable width and lines up with the shared nav above. Bands
+ * alternate ground rather than carrying rules between them, so the page reads
+ * as sections without a line drawn under every one.
+ */
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: var(--h-space-4);
+  box-sizing: border-box;
+}
+
+.band {
+  padding-block: var(--h-space-16);
+}
+
+.band-quiet {
+  background: var(--h-ground);
+}
+
+/* The measure the family sets for reading, not a number picked here. Applied
+ * to prose only — a panel of controls is not reading. */
+.prose {
+  max-width: var(--h-measure);
+}
+
+.prose > * + * {
+  margin-top: var(--h-space-4);
+}
+
+.prose h2 + p {
+  margin-top: var(--h-space-6);
+}
+
+/* ---- The eyebrow --------------------------------------------------------
+ * Mono, small, tracked and upper-case: the label above a heading that says
+ * what kind of thing follows. The accent is the family's rust, which is
+ * house colour and not project colour — §3 keeps the project colour in the
+ * plate and the ambient ground, and nowhere attached to an object.
+ */
+.eyebrow {
+  margin-bottom: var(--h-space-3);
+  font-family: var(--h-font-mono);
+  font-size: var(--h-text-micro);
+  line-height: var(--h-lh-micro);
+  letter-spacing: var(--h-tr-micro);
+  text-transform: uppercase;
+  color: var(--h-accent-ink);
+}

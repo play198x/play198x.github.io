@@ -80,21 +80,29 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
-    padding: clamp(1.5rem, 5vw, 3rem);
+    gap: var(--h-space-3);
+    padding: clamp(var(--h-space-6), 5vw, var(--h-space-12));
     border: 2px dashed var(--h-line);
     border-radius: 8px;
     background: var(--h-ground);
     text-align: center;
     font-family: var(--h-font-ui);
     color: var(--h-ink-body);
-    transition: border-color 0.15s ease, background 0.15s ease;
+    /* §6's one motion rule: the target rises fast when a file is over it
+     * and decays slowly when it leaves, the way phosphor does. Both
+     * durations are zeroed by the kit under prefers-reduced-motion. */
+    transition:
+      border-color var(--h-decay) var(--h-ease),
+      background var(--h-decay) var(--h-ease),
+      box-shadow var(--h-decay) var(--h-ease);
   }
 
   .drop-target.is-active {
     border-color: var(--h-accent);
     border-style: solid;
     background: var(--h-page);
+    box-shadow: var(--h-lift-1);
+    transition-duration: var(--h-rise);
   }
 
   .drop-target-prompt {
@@ -105,12 +113,13 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--h-space-2);
   }
 
   .drop-target-label {
     color: var(--h-ink-muted);
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
   }
 
   /* A visible, native <input type="file"> rather than a hidden input behind
@@ -119,7 +128,7 @@
    * path, not a fallback dressed up to look secondary. */
   .drop-target-input {
     font-family: inherit;
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
   }
 
   .drop-target-input:focus-visible {
@@ -132,14 +141,15 @@
     min-height: 1.2em;
     color: var(--h-ink-body);
     font-family: var(--h-font-mono);
-    font-size: 0.9em;
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
   }
 
   .archive-entries {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    margin: 1rem 0 0;
+    gap: var(--h-space-2);
+    margin: var(--h-space-4) 0 0;
     padding: 0;
     list-style: none;
     font-family: var(--h-font-ui);
@@ -151,7 +161,7 @@
 
   .archive-entry-button {
     width: 100%;
-    padding: 0.5rem 0.75rem;
+    padding: var(--h-space-2) var(--h-space-3);
     border: 1px solid var(--h-line);
     border-radius: 6px;
     background: var(--h-ground);
