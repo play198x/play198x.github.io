@@ -51,12 +51,7 @@ const items = [{ label: 'Play198x', href: '/', current: true }];
   <body>
     <SiteNav prefix="play" project="play" items={items} />
     <main>
-      <!-- href="/" so this renders as a link (role="link"), not a bare
-           <span>: a plain <span> has no ARIA role that supports a name, so
-           the aria-label Plate.astro sets on an unlinked plate is silently
-           dropped by assistive tech (axe: aria-prohibited-attr). Same fix
-           SiteNav.astro already applies to its own Plate via `homeHref`. -->
-      <Plate prefix="play" project="play" size={28} href="/" />
+      <Plate prefix="play" project="play" size={28} />
       <h1>Play198x</h1>
       <p>Play198x plays retro media in your browser. Drop a file below to play it — nothing you feed it ever leaves your browser.</p>
       <DropTarget />
