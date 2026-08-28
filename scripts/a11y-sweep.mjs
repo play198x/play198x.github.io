@@ -24,19 +24,22 @@
  * control and the transport — everything a visitor sees *after* the
  * interaction the site exists for — went out unmeasured, while the gate
  * reported the page as passing WCAG AA. So each route is audited in its
- * initial state and then again after each drop that reveals a panel, and the
- * summary below names the states it reached rather than counting routes and
- * letting the reader assume the rest.
+ * initial state and then again after each interaction that reveals a panel,
+ * and the summary below names the states it reached rather than counting
+ * routes and letting the reader assume the rest.
  *
- * The dropped files are built here, byte by byte, rather than committed: no
- * media lives in this repository, the same rule tests/player.spec.ts states
- * and tests/open-archive.test.mjs builds its ZIP under.
+ * The dropped files are built byte by byte rather than committed: no media
+ * lives in this repository, the same rule tests/player.spec.ts states.
+ * scripts/zip-fixture.mjs builds the archive, shared with
+ * tests/open-archive.test.mjs so the two cannot disagree about what a valid
+ * ZIP looks like.
  */
 import { chromium } from 'playwright';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serveDist } from './serve-dist.mjs';
+import { storedZip } from './zip-fixture.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = process.argv[2] ?? join(HERE, '..', 'dist');
@@ -95,42 +98,71 @@ const signature = (html) => {
 };
 
 /**
+ * A blank but validly-coloured ZX Spectrum SCREEN$: 6144 bytes of pixels then
+ * 768 attributes, 0x38 being black ink on white paper. Enough to bring the
+ * image panel up with a real decode behind it.
+ */
+function screen() {
+  const bytes = new Uint8Array(6912);
+  bytes.fill(0x38, 6144, 6912);
+  return bytes;
+}
+
+/** The same 1084-byte "M.K." shape tests/probe-routing.test.mjs proves probes
+ * as ProTracker. */
+function module_() {
+  const bytes = new Uint8Array(1084);
+  bytes.set([0x4d, 0x2e, 0x4b, 0x2e], 1080); // 'M.K.'
+  return bytes;
+}
+
+/**
  * The states this sweep drives the page through, beyond simply loading it.
- * Each names a panel that is `hidden` until an interaction reveals it, and
- * runs only on a route that actually has the drop target — if the player ever
- * moves to another URL, the sweep follows it rather than silently auditing
- * nothing.
+ * Each names a panel that is `hidden` until an interaction reveals it, and the
+ * whole sequence runs only on a route that actually has the drop target — if
+ * the player ever moves to another URL, the sweep follows it rather than
+ * silently auditing nothing.
  *
- * A ZX Spectrum SCREEN$ is 6912 bytes: 6144 of pixels, then 768 attributes.
- * Zeroed pixels with 0x38 attributes (black ink, white paper) give a blank but
- * validly-coloured screen — enough to bring the image panel up with a real
- * decode behind it. The module is the same 1084-byte "M.K." shape
- * tests/probe-routing.test.mjs proves probes as ProTracker.
+ * Order is deliberate. Dropping the module after the image is not redundant:
+ * showAudioPlayer() hides the image panel, so the two are audited separately
+ * rather than overlapping. The archive comes last and reaches two more states
+ * — the entry list, and the picture panel opened *from* a list click, which
+ * is a different path into that panel than a direct drop and can differ in
+ * what it leaves on screen.
  *
- * Dropping the module after the image is deliberate: showAudioPlayer() hides
- * the image panel, so the two states are audited separately rather than
- * overlapping.
+ * The archive deliberately holds one entry the player can open and one it
+ * cannot: an unrecognised entry renders as a real disabled <button> (see
+ * archiveEntryRow() in src/scripts/player.ts), and disabled controls are
+ * exactly where contrast defects hide from a casual look.
  */
 const PLAYER_STATES = [
   {
     name: 'image dropped',
-    file: 'sweep.scr',
-    bytes: () => {
-      const bytes = new Uint8Array(6912);
-      bytes.fill(0x38, 6144, 6912);
-      return bytes;
-    },
     reveals: '#player-panel',
+    act: (page) => drop(page, 'sweep.scr', screen()),
   },
   {
     name: 'module dropped',
-    file: 'sweep.mod',
-    bytes: () => {
-      const bytes = new Uint8Array(1084);
-      bytes.set([0x4d, 0x2e, 0x4b, 0x2e], 1080); // 'M.K.'
-      return bytes;
-    },
     reveals: '#audio-player-panel',
+    act: (page) => drop(page, 'sweep.mod', module_()),
+  },
+  {
+    name: 'archive dropped',
+    reveals: '#archive-entries',
+    act: (page) =>
+      drop(
+        page,
+        'sweep.zip',
+        storedZip([
+          { name: 'picture.scr', bytes: screen() },
+          { name: 'notes.txt', bytes: new TextEncoder().encode('not a format this player knows') },
+        ]),
+      ),
+  },
+  {
+    name: 'archive entry opened',
+    reveals: '#player-panel',
+    act: (page) => page.click('#archive-entries .archive-entry-button:not([disabled])'),
   },
 ];
 
@@ -212,14 +244,14 @@ for (const theme of ['light', 'dark']) {
     // reach. A route without one is fully audited by the pass above.
     if (await page.$('#drop-target')) {
       for (const state of PLAYER_STATES) {
-        await drop(page, state.file, state.bytes());
+        await state.act(page);
         // A panel that never appears means the sweep is about to audit the
         // state before it instead, and report that as coverage. Fail rather
         // than quietly measure the wrong thing.
         try {
           await page.waitForSelector(`${state.reveals}:not([hidden])`, { timeout: 10_000 });
         } catch {
-          console.error(`a11y: dropped ${state.file} but ${state.reveals} never appeared on ${route} (${theme}).`);
+          console.error(`a11y: "${state.name}" left ${state.reveals} unrevealed on ${route} (${theme}).`);
           await context.close();
           await browser.close();
           server.close();
