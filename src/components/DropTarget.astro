@@ -24,6 +24,23 @@
     <label class="drop-target-label" for="file-picker">Or choose a file from your device</label>
     <input id="file-picker" class="drop-target-input" type="file" />
   </div>
+  <!-- What it takes, at the point of taking it. The sections below say the
+       same thing at length; a visitor holding a file wants it here, and the
+       three groups are named apart because reading a picture, playing a tune
+       and opening a container are three different claims.
+
+       A list rather than a sentence: set as one run of prose in a centred box
+       it broke after "Music:" and orphaned "ProTracker MOD" on the next line,
+       and no amount of balancing fixes a break the text has no clean point
+       for. Three rows always break where the meaning does. -->
+  <dl class="drop-target-formats">
+    <dt>Pictures</dt>
+    <dd>SCREEN$ · Koala · Art Studio · ILBM</dd>
+    <dt>Music</dt>
+    <dd>ProTracker MOD</dd>
+    <dt>Containers</dt>
+    <dd>ZIP · Amiga ADF</dd>
+  </dl>
   <p id="drop-target-status" class="drop-target-status" role="status" aria-live="polite"></p>
 </div>
 
@@ -76,15 +93,22 @@
    * below sets `display: flex`, which would otherwise beat `hidden`,
    * leaving an empty list rendered before any archive is opened. */
 
+  /* Shaped like the panel it turns into. Player.astro's .player-panel has the
+   * same radius, ground and lift, so dropping a file swaps the contents of a
+   * box rather than replacing one shape with a different one — the page used
+   * to jump at the exact moment the visitor did the thing the site is for.
+   * The dashed border is the one thing kept apart, because it is what says
+   * "target" rather than "panel"; it goes solid on drag-over. */
   .drop-target {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--h-space-3);
-    padding: clamp(var(--h-space-6), 5vw, var(--h-space-12));
+    gap: var(--h-space-4);
+    padding: clamp(var(--h-space-6), 4vw, var(--h-space-8));
     border: 2px dashed var(--h-line);
     border-radius: 8px;
     background: var(--h-ground);
+    box-shadow: var(--h-lift-1);
     text-align: center;
     font-family: var(--h-font-ui);
     color: var(--h-ink-body);
@@ -107,6 +131,9 @@
 
   .drop-target-prompt {
     margin: 0;
+    font-size: var(--h-text-lead);
+    line-height: var(--h-lh-lead);
+    color: var(--h-ink);
   }
 
   .drop-target-picker {
@@ -126,9 +153,61 @@
    * a styled trigger — it is keyboard- and screen-reader-operable by
    * default, and this task's whole point is that the picker is a first-class
    * path, not a fallback dressed up to look secondary. */
+  /* The input stays native and visible — see the note above — but its button
+   * is the one control on the page that was rendering in the browser's own
+   * grey rather than the house's. ::file-selector-button styles that button
+   * without touching the element's semantics, so the keyboard and
+   * screen-reader path is exactly the one the browser ships. The muted colour
+   * is for the "No file chosen" text the browser writes beside it, which is
+   * the browser's to word and not worth shouting. */
   .drop-target-input {
     font-family: inherit;
     font-size: var(--h-text-small);
+    color: var(--h-ink-muted);
+  }
+
+  .drop-target-input::file-selector-button {
+    margin-right: var(--h-space-3);
+    padding: var(--h-space-2) var(--h-space-6);
+    border: 1px solid var(--h-line);
+    border-radius: 6px;
+    background: var(--h-page);
+    color: var(--h-ink-body);
+    font: inherit;
+    cursor: pointer;
+    transition:
+      border-color var(--h-decay) var(--h-ease),
+      box-shadow var(--h-decay) var(--h-ease);
+  }
+
+  .drop-target-input:hover::file-selector-button {
+    border-color: var(--h-accent);
+    box-shadow: var(--h-lift-1);
+    transition-duration: var(--h-rise);
+  }
+
+  .drop-target-input:focus-visible::file-selector-button {
+    border-color: var(--h-accent);
+    box-shadow: var(--h-lift-1);
+  }
+
+  /* An inline grid so the block centres in the box while its own two columns
+     stay left-aligned — the same auto/1fr shape .player-meta uses for the
+     panel this box turns into. */
+  .drop-target-formats {
+    display: inline-grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--h-space-1) var(--h-space-4);
+    margin: 0;
+    text-align: left;
+    font-family: var(--h-font-mono);
+    font-size: var(--h-text-micro);
+    line-height: var(--h-lh-micro);
+    color: var(--h-ink-muted);
+  }
+
+  .drop-target-formats dd {
+    margin: 0;
   }
 
   .drop-target-input:focus-visible {
