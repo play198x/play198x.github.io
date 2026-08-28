@@ -22,7 +22,14 @@
 // file only ever holds a `ModulePlaybackHandle`, never an `AudioContext`, a
 // wasm byte, or a worklet message.
 
-import init, { decode_image, probe, Container, type DecodedImage, type ImageMeta } from '@play198x/web';
+import init, {
+  decode_image,
+  moduleMeta,
+  probe,
+  Container,
+  type DecodedImage,
+  type ImageMeta,
+} from '@play198x/web';
 import { playModule, type ModulePlaybackHandle, type ModulePosition } from './audio.ts';
 
 export type Route = 'image' | 'audio' | 'unknown';
@@ -323,6 +330,11 @@ function audioElements() {
     name: document.getElementById('audio-name'),
     format: document.getElementById('audio-format'),
     length: document.getElementById('audio-length'),
+    titleLabel: document.getElementById('audio-title-label'),
+    title: document.getElementById('audio-title'),
+    voices: document.getElementById('audio-voices'),
+    samples: document.getElementById('audio-samples'),
+    sampleList: document.getElementById('audio-sample-list'),
     playButton: playButton instanceof HTMLButtonElement ? playButton : undefined,
     position: document.getElementById('audio-position'),
     status: document.getElementById('audio-status'),
@@ -535,17 +547,46 @@ function setPlayButtonLabel(label: string): void {
 }
 
 /**
+ * A module's length as a listener would say it, from the timing walk rather
+ * than the file size.
+ *
+ * A looping song is marked instead of being given a bare time. `duration_ms`
+ * is one pass — from the top of the order table to whichever comes first: the
+ * end of the song, an `F00` that stops it, or a position already played — so
+ * for a song that comes back on itself, printing it alone would state an
+ * ending the song does not have.
+ *
+ * Rounded to the second, with `0:00` reserved for a song that genuinely has
+ * nothing to play — a module whose order table is empty, which the walk
+ * reports as a zero duration. Anything with orders in it rounds up to `0:01`
+ * rather than down to zero: a song shorter than a second still played, and
+ * printing it as `0:00` would say the same thing as a module that did not.
+ */
+export function describeDuration(meta: { durationMs: number; loops: boolean }): string {
+  const seconds = meta.durationMs === 0 ? 0 : Math.max(1, Math.round(meta.durationMs / 1000));
+  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  return meta.loops ? `${clock}, then loops` : clock;
+}
+
+/**
  * Show a just-identified ProTracker entry: its name, format and size beside
  * a Play control — but hold its bytes rather than start anything. Starting
  * an `AudioContext` has to happen inside the Play button's own click
  * handler (see handleAudioPlayClick()), not here, or the browser refuses to
  * let it produce sound.
  *
- * `byteLength` stands in for the "length" a visitor would expect from a
- * player: `@play198x/web` 0.1.2 has no song-title or duration getter on
- * `ModulePlayer` (only live playback position — order/pattern/row/tick),
- * so there is nothing truer to show yet. This mirrors the file-size wording
- * classify() already uses in the status line above the drop target.
+ * Length is the song's real duration, from `moduleMeta()`. It used to be the
+ * file size, because the binding carried no duration — the core has walked
+ * the song for one all along, and `@play198x/web` 0.1.3 exposes the walk.
+ * A module that comes back on itself is marked rather than given a bare
+ * time: a looping song has no single length, and printing the point it
+ * returns to as if it were an ending states something untrue.
+ *
+ * The metadata read is wrapped: `probe()` has already said these bytes are a
+ * ProTracker module, but the two checks are not the same depth, and a file
+ * that satisfies the first and fails the second must still reach the
+ * transport. The panel then shows what it could read and omits what it
+ * could not, rather than the whole panel failing over a title.
  */
 function showAudioPlayer(bytes: Uint8Array, sourceLabel: string, format: string, certain: boolean): void {
   hidePlayer();
@@ -564,9 +605,52 @@ function showAudioPlayer(bytes: Uint8Array, sourceLabel: string, format: string,
     const qualifier = certain ? '' : 'probably ';
     els.format.textContent = `${qualifier}${AUDIO_FORMATS[format] ?? format}`;
   }
-  if (els.length) {
-    els.length.textContent = describeSize(bytes.byteLength);
+
+  // Everything below this line is what the module says about itself, and the
+  // file size is the fallback for all of it: a module whose bytes probe as
+  // ProTracker but will not decode still has a size, and a visitor still gets
+  // a panel and a Play button.
+  let meta: ReturnType<typeof moduleMeta> | undefined;
+  try {
+    meta = moduleMeta(bytes);
+  } catch {
+    meta = undefined;
   }
+
+  if (els.length) {
+    els.length.textContent = meta ? describeDuration(meta) : describeSize(bytes.byteLength);
+  }
+  if (els.voices) {
+    els.voices.textContent = meta ? `${meta.channels}` : '';
+  }
+  const title = meta?.title.trim() ?? '';
+  if (els.title && els.titleLabel) {
+    els.title.textContent = title;
+    els.title.hidden = title === '';
+    els.titleLabel.hidden = title === '';
+  }
+  if (els.samples && els.sampleList) {
+    const names = meta?.sampleNames ?? [];
+    // Trailing empty slots carry nothing and are not where anyone wrote — a
+    // message runs down from the first empty slot after the samples, not up
+    // from slot 31 — so the list stops after the last slot with text in it.
+    // Empty slots *before* that stay, because they are the blank lines in
+    // whatever was written.
+    let last = names.length - 1;
+    while (last >= 0 && names[last].trim() === '') {
+      last -= 1;
+    }
+    const shown = names.slice(0, last + 1);
+    els.sampleList.replaceChildren(
+      ...shown.map((name) => {
+        const li = document.createElement('li');
+        li.textContent = name.trimEnd();
+        return li;
+      }),
+    );
+    els.samples.hidden = shown.length === 0;
+  }
+
   if (els.position) {
     els.position.textContent = '';
   }

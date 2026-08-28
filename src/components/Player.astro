@@ -54,11 +54,30 @@
     <dl class="player-meta">
       <dt>Name</dt>
       <dd id="audio-name"></dd>
+      <!-- Hidden rather than blank when the module carries no title, which is
+           common: an empty row beside a filled label reads as a value that
+           failed to load. Both halves toggle together, or the grid keeps a
+           gap where the pair used to be. -->
+      <dt id="audio-title-label" hidden>Title</dt>
+      <dd id="audio-title" hidden></dd>
       <dt>Format</dt>
       <dd id="audio-format"></dd>
       <dt>Length</dt>
       <dd id="audio-length"></dd>
+      <dt>Voices</dt>
+      <dd id="audio-voices"></dd>
     </dl>
+
+    <!-- Every one of the 31 slots, including the empty ones, because the
+         empty ones are the interesting ones: authors wrote greetings,
+         credits and whole paragraphs down the unused half of the sample list
+         where a tracker's own display shows them. Listing only the slots a
+         song plays would drop those messages silently. Closed by default —
+         it is content, not a control, and most modules have little to say. -->
+    <details id="audio-samples" class="audio-samples" hidden>
+      <summary>Sample names</summary>
+      <ol id="audio-sample-list" class="audio-sample-list"></ol>
+    </details>
 
     <!-- Starting an AudioContext has to happen inside this button's own
          click handler — see src/scripts/audio.ts's playModule() doc — so
@@ -214,6 +233,40 @@
   .audio-play-button:disabled {
     cursor: default;
     opacity: 0.6;
+  }
+
+  .audio-samples {
+    font-size: var(--h-text-small);
+    line-height: var(--h-lh-small);
+  }
+
+  .audio-samples summary {
+    cursor: pointer;
+    color: var(--h-ink-muted);
+  }
+
+  .audio-sample-list {
+    /* Slot numbers are the point: a name's position in the list is what tells
+       a reader where in the tracker's display it sat, and a message written
+       down the empty half only makes sense in order. */
+    margin: var(--h-space-2) 0 0;
+    padding-left: var(--h-space-8);
+    font-family: var(--h-font-mono);
+    font-size: var(--h-text-micro);
+    line-height: var(--h-lh-micro);
+    color: var(--h-ink-body);
+  }
+
+  .audio-sample-list li::marker {
+    color: var(--h-ink-muted);
+  }
+
+  /* An empty slot still takes a line: it is where the next line of a message
+     would go, and collapsing it would close up the shape the author typed. */
+  .audio-sample-list li:empty::after {
+    content: '';
+    display: inline-block;
+    height: 1em;
   }
 
   .audio-position {
