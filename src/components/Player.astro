@@ -94,7 +94,10 @@
     padding: clamp(var(--h-space-4), 4vw, var(--h-space-8));
     border: 1px solid var(--h-line);
     border-radius: 8px;
-    background: var(--h-ground);
+    /* A card on the band, not a shape drawn on the same colour as it — see
+       DropTarget.astro's .drop-target, which this panel is matched to and
+       which carries the full reasoning. */
+    background: var(--h-page);
     box-shadow: var(--h-lift-1);
     font-family: var(--h-font-ui);
     color: var(--h-ink-body);
@@ -144,7 +147,9 @@
     margin: 0;
     padding: var(--h-space-2) var(--h-space-3);
     border-left: 3px solid var(--h-accent);
-    background: var(--h-page);
+    /* Inset within the card, so it takes the band's ground rather than the
+       card's — the note has to sit apart from the panel it is inside. */
+    background: var(--h-ground);
     color: var(--h-ink-body);
     font-size: var(--h-text-small);
     line-height: var(--h-lh-small);
@@ -192,10 +197,17 @@
     cursor: pointer;
   }
 
+  /* A wash of the house accent over the button's own ground, not a swap to
+   * another surface token: with the panel on --h-page the button rests on
+   * --h-ground, and every other ground in the set is now either the panel's
+   * or the band's, so a swap would make a hovered button read as part of
+   * whatever it borrowed the colour from. The rust is house colour, not
+   * project colour, so §3 is untouched. 9% follows emu198x.github.io's
+   * --accent-soft, which solved this on the same palette. */
   .audio-play-button:hover,
   .audio-play-button:focus-visible {
     border-color: var(--h-accent);
-    background: var(--h-page);
+    background: color-mix(in oklab, var(--h-accent) 9%, var(--h-ground));
     box-shadow: var(--h-lift-1);
   }
 
