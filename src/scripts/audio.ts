@@ -82,6 +82,13 @@ export interface ModulePlaybackHandle {
    * plenty for a visible order/pattern/row readout, not per-callback.
    * Returns a function that unsubscribes. */
   onPosition(listener: (position: ModulePosition) => void): () => void;
+  /** Subscribe to a failure that ends playback *after* it started — in
+   * practice a worklet processor that throws mid-render. Playback is over by
+   * the time this fires: `playing` is already false, the node renders silence
+   * for the rest of its life (a processor that throws is put in an error
+   * state by the spec and never recovers), and the handle should be disposed.
+   * Returns a function that unsubscribes. */
+  onError(listener: (error: Error) => void): () => void;
   /** Frees the wasm-side `ModulePlayer` and closes the `AudioContext`.
    * Idempotent — safe to call more than once, e.g. once from a "drop a new
    * file" cleanup and again from a page-unload handler racing it. */
@@ -436,6 +443,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
     });
 
     const positionListeners = new Set<(position: ModulePosition) => void>();
+    const errorListeners = new Set<(error: Error) => void>();
     let playing = false;
     let disposed = false;
 
@@ -570,6 +578,31 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
       throw error;
     }
 
+    // `ready` has settled by now, so the handler installed inside the promise
+    // above can only reach its `settled` check and no-op. That left the one
+    // failure this file cannot see coming uncovered: a processor that throws
+    // while *rendering* — a wasm trap in `process()`, a `render()` call on a
+    // freed player — after playback is already under way. `playing` stayed
+    // true, the transport went on reading as if a tune were running, and a
+    // console.error was the only trace.
+    //
+    // There is nothing to retry. Once a processor throws, the spec puts the
+    // node in an error state and it outputs silence for the rest of its life,
+    // so this is a stop rather than a stumble: `playing` goes false and stays
+    // false, and whoever holds the handle is told so it can say as much and
+    // dispose it.
+    node.onprocessorerror = (event) => {
+      console.error('[play198x audio] worklet processor error during playback', event);
+      playing = false;
+      // Same reasoning as the startup path's message: the event carries no
+      // detail that survives the worklet boundary in every engine, so this
+      // says what is known rather than inventing specifics.
+      const failure = new Error('The audio worklet stopped unexpectedly while playing.');
+      for (const listener of errorListeners) {
+        listener(failure);
+      }
+    };
+
     node.connect(audioContext.destination);
     playing = true;
 
@@ -595,10 +628,15 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
         positionListeners.add(listener);
         return () => positionListeners.delete(listener);
       },
+      onError(listener: (error: Error) => void) {
+        errorListeners.add(listener);
+        return () => errorListeners.delete(listener);
+      },
       dispose() {
         if (disposed) return;
         disposed = true;
         positionListeners.clear();
+        errorListeners.clear();
         node.port.postMessage({ type: 'dispose' });
         node.port.onmessage = null;
         node.onprocessorerror = null;
