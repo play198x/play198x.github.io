@@ -135,6 +135,92 @@ function module_() {
  * archiveEntryRow() in src/scripts/player.ts), and disabled controls are
  * exactly where contrast defects hide from a casual look.
  */
+/** A two-song `.ay`, built here because this sweep commits no media and runs
+ * against a built page with no way to call the Rust fixture builders.
+ *
+ * Minimal on purpose: enough structure for the page to parse the song table
+ * and show the selector, which is the state being audited. Every pointer in
+ * the format is signed, big-endian and relative to its own position. */
+function ay(songNames = ['Overture', 'Reprise']) {
+  const bytes = [];
+  const push = (...vs) => bytes.push(...vs);
+  const be16 = (v) => [(v >> 8) & 0xff, v & 0xff];
+  const put16 = (at, v) => {
+    const [hi, lo] = be16(v & 0xffff);
+    bytes[at] = hi;
+    bytes[at + 1] = lo;
+  };
+  const rel = (from, to) => (to - from) & 0xffff;
+
+  push(...new TextEncoder().encode('ZXAYEMUL'));
+  push(0, 3, 0, 0);
+  const authorPtr = bytes.length;
+  push(0, 0);
+  const miscPtr = bytes.length;
+  push(0, 0);
+  push(songNames.length - 1, 0);
+  const structPtr = bytes.length;
+  push(0, 0);
+
+  const authorAt = bytes.length;
+  push(...new TextEncoder().encode('Sweep'), 0);
+  const miscAt = bytes.length;
+  push(...new TextEncoder().encode('fixture'), 0);
+  const nameAt = songNames.map((name) => {
+    const at = bytes.length;
+    push(...new TextEncoder().encode(name), 0);
+    return at;
+  });
+
+  const structAt = bytes.length;
+  const namePtr = [];
+  const dataPtr = [];
+  for (let i = 0; i < songNames.length; i += 1) {
+    namePtr.push(bytes.length);
+    push(0, 0);
+    dataPtr.push(bytes.length);
+    push(0, 0);
+  }
+
+  const dataAt = [];
+  const pointsPtr = [];
+  const addrsPtr = [];
+  for (let i = 0; i < songNames.length; i += 1) {
+    dataAt.push(bytes.length);
+    push(0, 1, 2, 3, ...be16(250), ...be16(25), 0, 0);
+    pointsPtr.push(bytes.length);
+    push(0, 0);
+    addrsPtr.push(bytes.length);
+    push(0, 0);
+  }
+
+  const pointsAt = [];
+  const addrsAt = [];
+  const blockPtr = [];
+  for (let i = 0; i < songNames.length; i += 1) {
+    pointsAt.push(bytes.length);
+    push(...be16(0xc000), ...be16(0x8000), ...be16(0x8000));
+    addrsAt.push(bytes.length);
+    push(...be16(0x8000), ...be16(1));
+    blockPtr.push(bytes.length);
+    push(0, 0, 0, 0, 0, 0, 0, 0);
+  }
+  const blockAt = bytes.length;
+  push(0xc9);
+
+  put16(authorPtr, rel(authorPtr, authorAt));
+  put16(miscPtr, rel(miscPtr, miscAt));
+  put16(structPtr, rel(structPtr, structAt));
+  for (let i = 0; i < songNames.length; i += 1) {
+    put16(namePtr[i], rel(namePtr[i], nameAt[i]));
+    put16(dataPtr[i], rel(dataPtr[i], dataAt[i]));
+    put16(pointsPtr[i], rel(pointsPtr[i], pointsAt[i]));
+    put16(addrsPtr[i], rel(addrsPtr[i], addrsAt[i]));
+    put16(blockPtr[i], rel(blockPtr[i], blockAt));
+  }
+  return new Uint8Array(bytes);
+}
+
 const PLAYER_STATES = [
   {
     name: 'image dropped',
@@ -145,6 +231,15 @@ const PLAYER_STATES = [
     name: 'module dropped',
     reveals: '#audio-player-panel',
     act: (page) => drop(page, 'sweep.mod', module_()),
+  },
+  {
+    // The song selector only exists for a file that carries more than one
+    // tune, so it is only auditable in this state — a module never reaches
+    // it, and the sweep would otherwise report the control as covered
+    // without ever having seen it.
+    name: 'multi-song tune dropped',
+    reveals: '#audio-song',
+    act: (page) => drop(page, 'sweep.ay', ay()),
   },
   {
     name: 'archive dropped',

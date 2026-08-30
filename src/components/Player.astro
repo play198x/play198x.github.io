@@ -79,6 +79,16 @@
       <ol id="audio-sample-list" class="audio-sample-list"></ol>
     </details>
 
+    <!-- Shown only for a file that carries more than one tune, which a .ay
+         often does and a module never does. Each song is a separate entry
+         point with its own starting register state, so choosing one starts
+         a new player rather than seeking within this one — which is why
+         changing this restarts playback rather than scrubbing. -->
+    <div id="audio-song-wrap" class="audio-song-wrap" hidden>
+      <label for="audio-song">Song</label>
+      <select id="audio-song" class="audio-song"></select>
+    </div>
+
     <!-- Starting an AudioContext has to happen inside this button's own
          click handler — see src/scripts/audio.ts's playModule() doc — so
          nothing plays until it's pressed, even though the module's name,
