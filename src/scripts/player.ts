@@ -25,12 +25,13 @@
 import init, {
   decode_image,
   moduleMeta,
+  ayMeta,
   probe,
   Container,
   type DecodedImage,
   type ImageMeta,
 } from '@play198x/web';
-import { playModule, type ModulePlaybackHandle, type ModulePosition } from './audio.ts';
+import { playModule, type ModulePlaybackHandle, type PlayerPosition } from './audio.ts';
 
 export type Route = 'image' | 'audio' | 'unknown';
 
@@ -61,6 +62,10 @@ const IMAGE_FORMATS: Record<string, string> = {
 
 const AUDIO_FORMATS: Record<string, string> = {
   protracker: 'a ProTracker module',
+  // Not "an AY module": a `.ay` is Z80 code and data for a 128K Spectrum to
+  // run, not sample data to step through, and calling it a module would
+  // describe the wrong thing to anyone who knows the difference.
+  ay: 'a ZX Spectrum AY tune',
 };
 
 /**
@@ -282,6 +287,12 @@ let pendingAudioBytes: Uint8Array | undefined;
  * only through the handle's play/pause/dispose methods, never directly.
  * `undefined` before that click and after disposeAudio() runs. */
 let currentAudio: ModulePlaybackHandle | undefined;
+/** Which subtune the next Play starts, and which one a restart returns to.
+ *
+ * Held here rather than read from the `<select>` at the point of use so that
+ * a file with no song table — every module, and a single-song `.ay` — has a
+ * defined answer without the control existing. */
+let currentSong = 0;
 
 /** Bumped by disposeAudio(). handleAudioPlayClick() reads this before its
  * only `await` (starting playback) and compares it after — a mismatch means
@@ -322,6 +333,84 @@ function playerElements() {
   };
 }
 
+/** Hide the song list and forget any choice made in it.
+ *
+ * Called for every file that is not a multi-song `.ay`, because the panel is
+ * reused: a module dropped after a multi-song tune would otherwise inherit
+ * both the list and the song index chosen from it. */
+function resetSongSelector(els: ReturnType<typeof audioElements>): void {
+  currentSong = 0;
+  if (els.song) {
+    els.song.replaceChildren();
+  }
+  if (els.songWrap) {
+    els.songWrap.hidden = true;
+  }
+}
+
+/** Fill the panel for a `.ay` tune, including its song list. */
+function describeAyFile(els: ReturnType<typeof audioElements>, bytes: Uint8Array): void {
+  resetSongSelector(els);
+
+  let meta: ReturnType<typeof ayMeta> | undefined;
+  try {
+    meta = ayMeta(bytes);
+  } catch {
+    meta = undefined;
+  }
+
+  // A `.ay` carries no sample slots and no channel count of its own — the
+  // chip has three and always does — so both rows go away rather than
+  // showing a zero that reads as a measurement.
+  if (els.samples) {
+    els.samples.hidden = true;
+  }
+  if (els.voices) {
+    els.voices.textContent = meta ? '3' : '';
+  }
+
+  const title = meta?.title.trim() ?? '';
+  if (els.title && els.titleLabel) {
+    els.title.textContent = title;
+    els.title.hidden = title === '';
+    els.titleLabel.hidden = title === '';
+  }
+
+  const count = meta?.songCount() ?? 0;
+  if (els.length) {
+    const ms = meta?.songLengthMs(0);
+    // A `SongLength` of zero means the file does not say how long the song
+    // runs, not that it is over instantly — Plotting.ay declares zero for all
+    // four of its songs, and they play. Printing "0:00" for that would state
+    // a duration the file never claimed, so it falls back to the file size
+    // exactly as a module that will not decode does.
+    //
+    // `loops: false` because a `.ay` song does not come back on itself: it
+    // declares a length and then a fade, which is an ending rather than a
+    // loop point. Saying "then loops" would invent a property the format
+    // does not have.
+    els.length.textContent =
+      ms === undefined || ms === null || ms === 0
+        ? describeSize(bytes.byteLength)
+        : describeDuration({ durationMs: ms, loops: false });
+  }
+
+  // Only when there is a choice to make. A single-song file with a song list
+  // of one is a control that does nothing, which is worse than no control.
+  if (count > 1 && els.song && els.songWrap && meta) {
+    for (let index = 0; index < count; index += 1) {
+      const option = document.createElement('option');
+      option.value = `${index}`;
+      const name = meta.songName(index)?.trim();
+      // Numbered from 1 for a listener, who is not counting from zero.
+      option.textContent = name ? `${index + 1}. ${name}` : `Song ${index + 1}`;
+      els.song.append(option);
+    }
+    els.song.value = '0';
+    els.songWrap.hidden = false;
+  }
+}
+
 function audioElements() {
   const panel = document.getElementById('audio-player-panel');
   const playButton = document.getElementById('audio-play-button');
@@ -336,6 +425,11 @@ function audioElements() {
     samples: document.getElementById('audio-samples'),
     sampleList: document.getElementById('audio-sample-list'),
     playButton: playButton instanceof HTMLButtonElement ? playButton : undefined,
+    songWrap: document.getElementById('audio-song-wrap'),
+    song: (() => {
+      const el = document.getElementById('audio-song');
+      return el instanceof HTMLSelectElement ? el : undefined;
+    })(),
     position: document.getElementById('audio-position'),
     status: document.getElementById('audio-status'),
   };
@@ -606,61 +700,75 @@ function showAudioPlayer(bytes: Uint8Array, sourceLabel: string, format: string,
     els.format.textContent = `${qualifier}${AUDIO_FORMATS[format] ?? format}`;
   }
 
-  // Everything below this line is what the module says about itself, and the
-  // file size is the fallback for all of it: a module whose bytes probe as
-  // ProTracker but will not decode still has a size, and a visitor still gets
-  // a panel and a Play button.
-  let meta: ReturnType<typeof moduleMeta> | undefined;
-  try {
-    meta = moduleMeta(bytes);
-  } catch {
-    meta = undefined;
-  }
+  // An `.ay` is a different kind of thing from a module: no sample slots, no
+  // voice count from a magic, and a table of songs instead of one tune. It
+  // takes this branch and leaves before any of the module fields below.
+  // An `.ay` is a different kind of thing from a module: no sample slots,
+  // no voice count from a magic, and a table of songs instead of one tune.
+  // Both branches fall through to the reveal below — an early return here
+  // filled the panel and left it hidden.
+  if (format === 'ay') {
+    describeAyFile(els, bytes);
+  } else {
+    resetSongSelector(els);
 
-  if (els.length) {
-    els.length.textContent = meta ? describeDuration(meta) : describeSize(bytes.byteLength);
-  }
-  if (els.voices) {
-    els.voices.textContent = meta ? `${meta.channels}` : '';
-  }
-  const title = meta?.title.trim() ?? '';
-  if (els.title && els.titleLabel) {
-    els.title.textContent = title;
-    els.title.hidden = title === '';
-    els.titleLabel.hidden = title === '';
-  }
-  if (els.samples && els.sampleList) {
-    const names = meta?.sampleNames ?? [];
-    // Trailing empty slots carry nothing and are not where anyone wrote — a
-    // message runs down from the first empty slot after the samples, not up
-    // from slot 31 — so the list stops after the last slot with text in it.
-    // Empty slots *before* that stay, because they are the blank lines in
-    // whatever was written.
-    let last = names.length - 1;
-    while (last >= 0 && names[last].trim() === '') {
-      last -= 1;
+    // Everything below this line is what the module says about itself, and the
+    // file size is the fallback for all of it: a module whose bytes probe as
+    // ProTracker but will not decode still has a size, and a visitor still gets
+    // a panel and a Play button.
+    let meta: ReturnType<typeof moduleMeta> | undefined;
+    try {
+      meta = moduleMeta(bytes);
+    } catch {
+      meta = undefined;
     }
-    const shown = names.slice(0, last + 1);
-    els.sampleList.replaceChildren(
-      ...shown.map((name) => {
-        const li = document.createElement('li');
-        li.textContent = name.trimEnd();
-        return li;
-      }),
-    );
-    els.samples.hidden = shown.length === 0;
+
+    if (els.length) {
+      els.length.textContent = meta ? describeDuration(meta) : describeSize(bytes.byteLength);
+    }
+    if (els.voices) {
+      els.voices.textContent = meta ? `${meta.channels}` : '';
+    }
+    const title = meta?.title.trim() ?? '';
+    if (els.title && els.titleLabel) {
+      els.title.textContent = title;
+      els.title.hidden = title === '';
+      els.titleLabel.hidden = title === '';
+    }
+    if (els.samples && els.sampleList) {
+      const names = meta?.sampleNames ?? [];
+      // Trailing empty slots carry nothing and are not where anyone wrote — a
+      // message runs down from the first empty slot after the samples, not up
+      // from slot 31 — so the list stops after the last slot with text in it.
+      // Empty slots *before* that stay, because they are the blank lines in
+      // whatever was written.
+      let last = names.length - 1;
+      while (last >= 0 && names[last].trim() === '') {
+        last -= 1;
+      }
+      const shown = names.slice(0, last + 1);
+      els.sampleList.replaceChildren(
+        ...shown.map((name) => {
+          const li = document.createElement('li');
+          li.textContent = name.trimEnd();
+          return li;
+        }),
+      );
+      els.samples.hidden = shown.length === 0;
+    }
+
+    if (els.position) {
+      els.position.textContent = '';
+    }
+    if (els.status) {
+      els.status.textContent = '';
+    }
+    setPlayButtonLabel('Play');
+    if (els.playButton) {
+      els.playButton.disabled = false;
+    }
   }
 
-  if (els.position) {
-    els.position.textContent = '';
-  }
-  if (els.status) {
-    els.status.textContent = '';
-  }
-  setPlayButtonLabel('Play');
-  if (els.playButton) {
-    els.playButton.disabled = false;
-  }
   els.panel.hidden = false;
 }
 
@@ -706,7 +814,7 @@ async function handleAudioPlayClick(): Promise<void> {
   els.playButton.disabled = true;
   try {
     const token = audioGeneration;
-    const handle = await playModule(pendingAudioBytes);
+    const handle = await playModule(pendingAudioBytes, currentSong);
     if (token !== audioGeneration) {
       // Superseded while playModule() was still starting — see this
       // function's doc. Dispose immediately rather than publish it: this is
@@ -723,12 +831,20 @@ async function handleAudioPlayClick(): Promise<void> {
     // what's displayed, so a write with unchanged text is still a wasted
     // announcement.
     let lastPositionText: string | undefined;
-    handle.onPosition((position: ModulePosition) => {
+    handle.onPosition((position: PlayerPosition) => {
       const { position: positionEl } = audioElements();
       if (!positionEl) {
         return;
       }
-      const text = `Order ${position.order}, pattern ${position.pattern}, row ${position.row}`;
+      // A tune driven by an interrupt has no order table and no rows. It
+      // reports the song it is playing and how many frames in it is — the
+      // file's own unit of time, which is what its declared length is in
+      // too. Showing empty Order/pattern/row fields for one would be the
+      // panel claiming a position it does not have.
+      const text =
+        position.kind === 'frame'
+          ? `Song ${position.song + 1}, frame ${position.frame}`
+          : `Order ${position.order}, pattern ${position.pattern}, row ${position.row}`;
       if (text === lastPositionText) {
         return;
       }
@@ -779,11 +895,34 @@ async function handleAudioPlayClick(): Promise<void> {
  * wireFormatOverride() below.
  */
 export function wireAudioPlayer(): void {
-  const { playButton } = audioElements();
+  const { playButton, song } = audioElements();
   if (!playButton) {
     return;
   }
   playButton.addEventListener('click', () => {
+    void handleAudioPlayClick();
+  });
+
+  // Changing song is not a seek. Each song in a `.ay` is a separate entry
+  // point with its own starting register state, so the only way to hear
+  // another one is to build a player for it — which means tearing down
+  // whatever is playing and starting again. Doing that here, rather than
+  // waiting for the next Play press, is what makes the control behave the
+  // way a listener expects a song list to: pick one and it plays.
+  song?.addEventListener('change', () => {
+    const chosen = Number.parseInt(song.value, 10);
+    currentSong = Number.isNaN(chosen) ? 0 : chosen;
+
+    if (!currentAudio) {
+      return;
+    }
+    // Bump the generation first: an in-flight playModule() from the previous
+    // selection must not publish itself over this one (see
+    // handleAudioPlayClick's own token check).
+    audioGeneration += 1;
+    currentAudio.dispose();
+    currentAudio = undefined;
+    setPlayButtonLabel('Play');
     void handleAudioPlayClick();
   });
 }

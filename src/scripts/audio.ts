@@ -39,21 +39,23 @@
 // this kind of host (a worker/worklet that already has the bytes and can't
 // await a `fetch()` mid-render). That keeps every byte of wasm glue on this
 // file's list of "things it knows are unstable", and everywhere else in the
-// codebase keeps calling the same public `ModulePlayer` class the package
+// codebase keeps calling the same public `Player` class the package
 // README documents — just from inside the worklet instead of the main
 // thread.
 
 const PROCESSOR_NAME = 'play198x-module-player';
 
-/** What one position update names — the same shape `Engine::position()`
- * exposes through `ModulePlayer`'s getters, read from inside the worklet
- * (the only place a `ModulePlayer` instance exists) and relayed here. */
-export interface ModulePosition {
-  order: number;
-  pattern: number;
-  row: number;
-  tick: number;
-}
+/** Where playback has got to, in whichever terms the format has.
+ *
+ * A discriminated union rather than one shape with optional fields: a `.ay`
+ * has no order table and a module has no subtune, so a single shape would
+ * mean four properties that are `undefined` half the time and a reader with
+ * no way to know which half. `kind` is read once and settles it. Mirrors
+ * `play198x_core::player::Position`, whose own doc says why it is one variant
+ * per *shape* rather than per format. */
+export type PlayerPosition =
+  | { kind: 'module'; order: number; pattern: number; row: number; tick: number }
+  | { kind: 'frame'; song: number; frame: number };
 
 /** A cheap, per-second self-report from the render callback itself — see
  * this file's header comment on why the worklet, not the main thread,
@@ -81,7 +83,7 @@ export interface ModulePlaybackHandle {
   /** Subscribe to position updates, throttled to a few times a second —
    * plenty for a visible order/pattern/row readout, not per-callback.
    * Returns a function that unsubscribes. */
-  onPosition(listener: (position: ModulePosition) => void): () => void;
+  onPosition(listener: (position: PlayerPosition) => void): () => void;
   /** Subscribe to a failure that ends playback *after* it started — in
    * practice a worklet processor that throws mid-render. Playback is over by
    * the time this fires: `playing` is already false, the node renders silence
@@ -89,7 +91,7 @@ export interface ModulePlaybackHandle {
    * state by the spec and never recovers), and the handle should be disposed.
    * Returns a function that unsubscribes. */
   onError(listener: (error: Error) => void): () => void;
-  /** Frees the wasm-side `ModulePlayer` and closes the `AudioContext`.
+  /** Frees the wasm-side `Player` and closes the `AudioContext`.
    * Idempotent — safe to call more than once, e.g. once from a "drop a new
    * file" cleanup and again from a page-unload handler racing it. */
   dispose(): void;
@@ -210,6 +212,9 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
     // wasm build uses.
     this.positionIntervalCalls = 1;
     this.lastPosition = undefined;
+    // Overwritten at 'init' from the player itself; 'module' until then so a
+    // position posted before init cannot claim to be a subtune.
+    this.positionKind = 'module';
     this.port.onmessage = (event) => this.handleMessage(event.data);
   }
 
@@ -218,9 +223,13 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
       case 'init': {
         try {
           initSync({ module: new Uint8Array(data.wasmBytes) });
-          this.player = new ModulePlayer(new Uint8Array(data.moduleBytes), sampleRate);
-          this.quantum = ModulePlayer.renderQuantum();
-          // ModulePlayer's own constructor doc: it "start[s] it playing" —
+          this.player = new Player(new Uint8Array(data.moduleBytes), data.song || 0, sampleRate);
+          this.quantum = Player.renderQuantum();
+          // Read once: which of the two groups of position getters mean
+          // anything for this file. Asking every post would be asking a
+          // question whose answer cannot change.
+          this.positionKind = this.player.positionKind();
+          // Player's own constructor doc: it "start[s] it playing" —
           // this mirrors that default rather than guessing, since nothing
           // ever posts an explicit 'play' message for the very first start
           // (see playModule() below: it connects the node and flips its
@@ -235,11 +244,11 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
         break;
       }
       case 'play':
-        if (this.player) this.player.set_playing(true);
+        if (this.player) this.player.setPlaying(true);
         this.playing = true;
         break;
       case 'pause':
-        if (this.player) this.player.set_playing(false);
+        if (this.player) this.player.setPlaying(false);
         this.playing = false;
         break;
       case 'seek':
@@ -296,25 +305,32 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
       // calls", ~31×/s at 128 samples/48kHz, an order of magnitude past what
       // this file's own header comment always claimed) and never at all
       // while paused — a paused transport holds its row (see
-      // ModulePlayer.set_playing's doc), so there is nothing new to say, and
+      // Player.set_playing's doc), so there is nothing new to say, and
       // the old code posted unconditionally regardless of this.playing.
       // Also skipped when the position hasn't actually changed since the
       // last post, so a slow tune landing on the same row across several
       // checks doesn't repost it.
       if (this.playing && this.callCount % this.positionIntervalCalls === 0) {
-        const position = {
-          order: this.player.order,
-          pattern: this.player.pattern,
-          row: this.player.row,
-          tick: this.player.tick,
-        };
+        const position =
+          this.positionKind === 'frame'
+            ? { kind: 'frame', song: this.player.song, frame: this.player.frame }
+            : {
+                kind: 'module',
+                order: this.player.order,
+                pattern: this.player.pattern,
+                row: this.player.row,
+                tick: this.player.tick,
+              };
         const last = this.lastPosition;
         if (
           !last ||
+          last.kind !== position.kind ||
           last.order !== position.order ||
           last.pattern !== position.pattern ||
           last.row !== position.row ||
-          last.tick !== position.tick
+          last.tick !== position.tick ||
+          last.song !== position.song ||
+          last.frame !== position.frame
         ) {
           this.port.postMessage({ type: 'position', ...position });
           this.lastPosition = position;
@@ -415,7 +431,7 @@ async function loadWasmBytes(): Promise<ArrayBuffer> {
  * Callers show the module's name and a play control first, and call this
  * only once that control is pressed; see src/scripts/player.ts.
  */
-export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandle> {
+export async function playModule(bytes: Uint8Array, song = 0): Promise<ModulePlaybackHandle> {
   const audioContext = new AudioContext();
 
   // Everything from here to the `return` below runs inside this try: the
@@ -442,15 +458,15 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
       outputChannelCount: [2],
     });
 
-    const positionListeners = new Set<(position: ModulePosition) => void>();
+    const positionListeners = new Set<(position: PlayerPosition) => void>();
     const errorListeners = new Set<(error: Error) => void>();
     let playing = false;
     let disposed = false;
 
-    // Resolves once the worklet's own `ModulePlayer` has actually been built;
+    // Resolves once the worklet's own `Player` has actually been built;
     // rejects with the worklet's own message if it hasn't. Bytes that pass
     // probe()'s lighter magic-number check (see player.ts) can still fail the
-    // real parse inside `new ModulePlayer(...)` — an unsupported channel
+    // real parse inside `new Player(...)` — an unsupported channel
     // count (`6CHN`/`8CHN`/`FLT8` pass the magic check but are rejected by
     // the decoder), for one concrete, reachable example. That failure
     // happens entirely inside the worklet. Without waiting for this,
@@ -465,7 +481,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
     // still leaves open. The two *known* failures are covered only by
     // accident of where they happen to occur: a worklet whose module fails
     // to evaluate makes `new AudioWorkletNode(...)` throw synchronously
-    // (already surfaced, further up), and a `ModulePlayer` constructor
+    // (already surfaced, further up), and a `Player` constructor
     // failure is caught by the processor's own try/catch and turned into an
     // `error` message (handled below). Neither guard defends a processor
     // whose constructor throws *before* `this.port.onmessage` is assigned,
@@ -475,7 +491,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
     // replace, just relocated.
     //
     // `READY_TIMEOUT_MS` covers the gap: instantiating this wasm and
-    // constructing a `ModulePlayer` from it is single-digit-to-low-double-
+    // constructing a `Player` from it is single-digit-to-low-double-
     // digit milliseconds in practice (measured end-to-end, including
     // `AudioContext`/`addModule`/fetch on top of this step, at 16-44ms — see
     // task-8-report.md), so 3 seconds is generous headroom between "a slow
@@ -514,17 +530,17 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
 
       node.port.onmessage = (event: MessageEvent) => {
         const data = event.data as
-          | { type: 'position'; order: number; pattern: number; row: number; tick: number }
+          | ({ type: 'position' } & PlayerPosition)
           | { type: 'heartbeat'; calls: number; glitches: number; maxGapMs: number }
           | { type: 'ready' }
           | { type: 'error'; message: string };
         if (data.type === 'position') {
-          const position: ModulePosition = { order: data.order, pattern: data.pattern, row: data.row, tick: data.tick };
+          const { type: _type, ...position } = data;
           for (const listener of positionListeners) {
             listener(position);
           }
         } else if (data.type === 'ready') {
-          // Marks the moment the worklet's own ModulePlayer finished
+          // Marks the moment the worklet's own Player finished
           // construction — the next process() call renders real audio rather
           // than the pre-init silence. Logged for the same reason the
           // heartbeat is: whoever is verifying playback with devtools open.
@@ -559,7 +575,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
     // `wasmBytes` above needs to survive for the next play() call.
     const wasmBytesCopy = wasmBytes.slice(0);
     const moduleBytesCopy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    node.port.postMessage({ type: 'init', wasmBytes: wasmBytesCopy, moduleBytes: moduleBytesCopy }, [
+    node.port.postMessage({ type: 'init', wasmBytes: wasmBytesCopy, moduleBytes: moduleBytesCopy, song }, [
       wasmBytesCopy,
       moduleBytesCopy,
     ]);
@@ -624,7 +640,7 @@ export async function playModule(bytes: Uint8Array): Promise<ModulePlaybackHandl
         if (disposed) return;
         node.port.postMessage({ type: 'seek', order });
       },
-      onPosition(listener: (position: ModulePosition) => void) {
+      onPosition(listener: (position: PlayerPosition) => void) {
         positionListeners.add(listener);
         return () => positionListeners.delete(listener);
       },
