@@ -26,6 +26,7 @@ import init, {
   decode_image,
   moduleMeta,
   ayMeta,
+  sidMeta,
   probe,
   Container,
   type DecodedImage,
@@ -66,6 +67,7 @@ const AUDIO_FORMATS: Record<string, string> = {
   // run, not sample data to step through, and calling it a module would
   // describe the wrong thing to anyone who knows the difference.
   ay: 'a ZX Spectrum AY tune',
+  sid: 'a Commodore 64 SID tune',
 };
 
 /**
@@ -411,6 +413,42 @@ function describeAyFile(els: ReturnType<typeof audioElements>, bytes: Uint8Array
   }
 }
 
+/** Fill the panel for a PSID/RSID tune and select its declared start song. */
+function describeSidFile(els: ReturnType<typeof audioElements>, bytes: Uint8Array): void {
+  resetSongSelector(els);
+  let meta: ReturnType<typeof sidMeta> | undefined;
+  try {
+    meta = sidMeta(bytes);
+  } catch {
+    meta = undefined;
+  }
+
+  if (els.samples) els.samples.hidden = true;
+  if (els.voices) els.voices.textContent = meta ? '3' : '';
+  if (els.length) els.length.textContent = describeSize(bytes.byteLength);
+
+  const title = meta?.title.trim() ?? '';
+  if (els.title && els.titleLabel) {
+    els.title.textContent = title;
+    els.title.hidden = title === '';
+    els.titleLabel.hidden = title === '';
+  }
+
+  const count = meta?.songCount() ?? 0;
+  const start = meta ? Math.min(meta.startSong, Math.max(0, count - 1)) : 0;
+  currentSong = start;
+  if (count > 1 && els.song && els.songWrap) {
+    for (let index = 0; index < count; index += 1) {
+      const option = document.createElement('option');
+      option.value = `${index}`;
+      option.textContent = `Song ${index + 1}`;
+      els.song.append(option);
+    }
+    els.song.value = `${start}`;
+    els.songWrap.hidden = false;
+  }
+}
+
 function audioElements() {
   const panel = document.getElementById('audio-player-panel');
   const playButton = document.getElementById('audio-play-button');
@@ -709,6 +747,8 @@ function showAudioPlayer(bytes: Uint8Array, sourceLabel: string, format: string,
   // filled the panel and left it hidden.
   if (format === 'ay') {
     describeAyFile(els, bytes);
+  } else if (format === 'sid') {
+    describeSidFile(els, bytes);
   } else {
     resetSongSelector(els);
 

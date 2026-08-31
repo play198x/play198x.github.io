@@ -30,6 +30,13 @@ test('an audio-format entry is openable, with a friendly label', () => {
   assert.match(result.label, /ProTracker module/);
 });
 
+test('a SID entry is routed to the shared audio player', () => {
+  const result = describeEntry({ format: 'sid', confidence: 'certain' }, 4096);
+  assert.equal(result.route, 'audio');
+  assert.equal(result.openable, true);
+  assert.match(result.label, /SID/);
+});
+
 test('a probable (not certain) audio entry says so in its label', () => {
   const result = describeEntry({ format: 'protracker', confidence: 'probable' }, 1084);
 

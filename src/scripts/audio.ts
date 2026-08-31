@@ -296,6 +296,10 @@ class Play198xModuleProcessor extends AudioWorkletProcessor {
         this.refreshViews();
       }
       const rendered = this.player.render(this.quantum);
+      const playbackError = this.player.playbackError;
+      if (playbackError) {
+        throw new Error(playbackError);
+      }
       output[0].set(this.left.subarray(0, rendered));
       if (output[1]) {
         output[1].set(this.right.subarray(0, rendered));

@@ -161,3 +161,62 @@ test('a dropped synthetic ProTracker module plays in the real, built page', asyn
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('a dropped callable PSID plays through the real wasm worklet', async () => {
+  if (!existsSync(DIST)) throw new Error('player.spec: no dist/ — run `npm run build` first.');
+  const { server, baseUrl } = await serveDist(DIST);
+  try {
+    const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(String(error)));
+      page.on('console', (message) => {
+        if (message.type() === 'error') errors.push(message.text());
+      });
+      await page.goto(baseUrl, { waitUntil: 'load' });
+      await page.waitForSelector('#drop-target');
+
+      await page.evaluate(() => {
+        const bytes = new Uint8Array(0x7c + 28);
+        bytes.set([0x50, 0x53, 0x49, 0x44], 0); // PSID
+        bytes.set([0, 2, 0, 0x7c, 0x10, 0, 0x10, 0, 0x10, 1, 0, 1, 0, 1], 4);
+        bytes.set(new TextEncoder().encode('Browser SID'), 0x16);
+        // init: RTS; play: program voice 1 and master volume, then RTS.
+        bytes.set(
+          [
+            0x60, 0xa9, 0x00, 0x8d, 0x00, 0xd4, 0xa9, 0x10, 0x8d, 0x01, 0xd4, 0xa9, 0x21,
+            0x8d, 0x04, 0xd4, 0xa9, 0xf0, 0x8d, 0x05, 0xd4, 0xa9, 0x0f, 0x8d, 0x18, 0xd4, 0x60,
+          ],
+          0x7c,
+        );
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([bytes], 'browser.sid', { type: 'application/octet-stream' }));
+        document
+          .getElementById('drop-target')
+          ?.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      });
+
+      const panel = page.locator('#audio-player-panel');
+      await panel.waitFor({ state: 'visible', timeout: 10_000 });
+      assert.match((await panel.locator('#audio-format').textContent()) ?? '', /SID/);
+      assert.equal(await panel.locator('#audio-title').textContent(), 'Browser SID');
+      assert.equal(await panel.locator('#audio-voices').textContent(), '3');
+
+      const play = panel.locator('#audio-play-button');
+      await play.click();
+      await play.filter({ hasText: 'Pause' }).waitFor({ timeout: 10_000 });
+      await page.waitForFunction(
+        () => /frame [1-9]/.test(document.getElementById('audio-position')?.textContent ?? ''),
+        undefined,
+        { timeout: 10_000 },
+      );
+      assert.equal((await panel.locator('#audio-status').textContent())?.trim(), '');
+      assert.deepEqual(errors, [], `page logged an error: ${errors.join('; ')}`);
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
