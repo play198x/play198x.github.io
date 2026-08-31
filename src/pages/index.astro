@@ -53,8 +53,9 @@ const description = 'Play198x: a retro media player that runs entirely in your b
           </p>
           <p>
             Callable PSID tunes play without a ROM. RSID, self-driven PSID, multi-SID and tunes that
-            read a mapped Commodore ROM are recognised and declined with the reason; they
-            need the fuller C64 environment tracked separately from this first SID slice.
+            read a mapped Commodore ROM are recognised and declined with the reason. RSID and
+            self-driven PSID belong to Emu198x because they require a continuously scheduled C64;
+            the others are outside Play198x’s deliberately bounded callable SID surface.
           </p>
           <p>
             It opens plain files, ZIP archives, and Amiga ADF disk images (the standard density; not
