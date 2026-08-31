@@ -32,10 +32,12 @@ const description = 'Play198x: a retro media player that runs entirely in your b
       <div class="columns">
         <section class="prose" aria-labelledby="what-it-is-heading">
           <h2 id="what-it-is-heading">What Play198x is</h2>
-          <p>Play198x renders media. It does not boot a machine, run a program, or emulate a CPU.</p>
+          <p>Play198x renders media. It does not boot a whole machine.</p>
           <p>
             A ZX Spectrum SCREEN$ or a Commodore 64 bitmap opens the way a photo does; a ProTracker
-            module plays the way an MP3 does: read, decoded, and shown or heard.
+            module plays the way an MP3 does: read, decoded, and shown or heard. AY and SID tunes
+            carry small player programs; Play198x runs those against Emu198x's CPU and sound-chip
+            cores in a deliberately minimal host, without booting a Spectrum or C64.
           </p>
           <p>
             Every file you drop stays in your browser. Play198x decodes it there and never uploads,
@@ -46,13 +48,13 @@ const description = 'Play198x: a retro media player that runs entirely in your b
         <section class="prose" aria-labelledby="what-it-plays-heading">
           <h2 id="what-it-plays-heading">What it plays today</h2>
           <p>
-            Play198x reads five formats: ZX Spectrum SCREEN$, Commodore 64 Koala Paint, Commodore 64
-            Art Studio, Amiga IFF ILBM, and ProTracker MOD.
+            Play198x reads seven formats: ZX Spectrum SCREEN$ and AY, Commodore 64 Koala Paint, Art
+            Studio and SID, Amiga IFF ILBM, and ProTracker MOD.
           </p>
           <p>
-            It does not yet play SID or AY chiptunes. Both need chip emulation that lives in Emu198x,
-            and Emu198x's chip crates are not published yet
-            (<a href="https://github.com/emu198x/emu198x/issues/1214">emu198x/emu198x#1214</a>).
+            Callable PSID tunes play without a ROM. RSID, self-driven PSID, multi-SID and tunes that
+            read a mapped Commodore ROM are recognised and declined with the reason; they
+            need the fuller C64 environment tracked separately from this first SID slice.
           </p>
           <p>
             It opens plain files, ZIP archives, and Amiga ADF disk images (the standard density; not
