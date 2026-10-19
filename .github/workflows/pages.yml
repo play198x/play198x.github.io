@@ -26,6 +26,7 @@ jobs:
   build:
     name: Build Astro site
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out site
         uses: actions/checkout@v7
@@ -91,6 +92,7 @@ jobs:
     # would publish an unmerged branch to the live site.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: write
